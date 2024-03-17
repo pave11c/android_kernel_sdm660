@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,6 +18,7 @@
 #include <linux/time.h>
 #include <linux/math64.h>
 #include <linux/wait.h>
+#include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <sound/core.h>
@@ -106,7 +107,7 @@ struct msm_compr_pdata {
 	struct msm_compr_ch_map *ch_map[MSM_FRONTEND_DAI_MAX];
 	int32_t ion_fd[MSM_FRONTEND_DAI_MAX];
 	bool is_in_use[MSM_FRONTEND_DAI_MAX];
-	bool avs_ver;
+	struct mutex lock;
 };
 
 struct msm_compr_audio {
@@ -947,7 +948,6 @@ static void populate_codec_list(struct msm_compr_audio *prtd)
 	prtd->compr_cap.codecs[14] = SND_AUDIOCODEC_APTX;
 	prtd->compr_cap.codecs[15] = SND_AUDIOCODEC_TRUEHD;
 	prtd->compr_cap.codecs[16] = SND_AUDIOCODEC_IEC61937;
-	prtd->compr_cap.codecs[17] = SND_AUDIOCODEC_APTXHD;
 }
 
 static int msm_compr_send_media_format_block(struct snd_compr_stream *cstream,
@@ -1018,18 +1018,7 @@ static int msm_compr_send_media_format_block(struct snd_compr_stream *cstream,
 			sample_word_size = 16;
 			break;
 		}
-		if (pdata->avs_ver &&
-			(q6core_get_avs_version() == Q6_SUBSYS_AVS2_7))
-			ret = q6asm_media_format_block_pcm_format_support_v3(
-							prtd->audio_client,
-							prtd->sample_rate,
-							prtd->num_channels,
-							bit_width, stream_id,
-							use_default_chmap,
-							chmap,
-							sample_word_size);
-		else
-			ret = q6asm_media_format_block_pcm_format_support_v4(
+		ret = q6asm_media_format_block_pcm_format_support_v4(
 							prtd->audio_client,
 							prtd->sample_rate,
 							prtd->num_channels,
@@ -1226,8 +1215,6 @@ static int msm_compr_send_media_format_block(struct snd_compr_stream *cstream,
 			pr_err("%s: CMD IEC61937 Format block failed ret %d\n",
 				__func__, ret);
 		break;
-	case FORMAT_APTXHD:
-		pr_debug("SND_AUDIOCODEC_APTXHD\n");
 	case FORMAT_APTX:
 		pr_debug("SND_AUDIOCODEC_APTX\n");
 		memset(&aptx_cfg, 0x0, sizeof(struct aptx_dec_bt_addr_cfg));
@@ -1285,8 +1272,6 @@ static int msm_compr_configure_dsp_for_playback
 	uint16_t bits_per_sample = 16;
 	int dir = IN, ret = 0;
 	struct audio_client *ac = prtd->audio_client;
-	struct msm_compr_pdata *pdata =
-			snd_soc_platform_get_drvdata(soc_prtd->platform);
 	uint32_t stream_index;
 	struct asm_softpause_params softpause = {
 		.enable = SOFT_PAUSE_ENABLE,
@@ -1337,14 +1322,7 @@ static int msm_compr_configure_dsp_for_playback
 	} else {
 		pr_debug("%s: stream_id %d bits_per_sample %d\n",
 				__func__, ac->stream_id, bits_per_sample);
-		if (pdata->avs_ver &&
-			(q6core_get_avs_version() == Q6_SUBSYS_AVS2_7))
-			ret = q6asm_stream_open_write_v3(ac,
-				prtd->codec, bits_per_sample,
-				ac->stream_id,
-				prtd->gapless_state.use_dsp_gapless_mode);
-		else
-			ret = q6asm_stream_open_write_v4(ac,
+		ret = q6asm_stream_open_write_v4(ac,
 				prtd->codec, bits_per_sample,
 				ac->stream_id,
 				prtd->gapless_state.use_dsp_gapless_mode);
@@ -1538,7 +1516,7 @@ static int msm_compr_configure_dsp_for_capture(struct snd_compr_stream *cstream)
 
 static int msm_compr_map_ion_fd(struct msm_compr_audio *prtd, int fd)
 {
-	ion_phys_addr_t paddr = 0;
+	ion_phys_addr_t paddr;
 	size_t pa_len = 0;
 	int ret = 0;
 
@@ -1568,7 +1546,7 @@ done:
 
 static int msm_compr_unmap_ion_fd(struct msm_compr_audio *prtd)
 {
-	ion_phys_addr_t paddr = 0;
+	ion_phys_addr_t paddr;
 	size_t pa_len = 0;
 	int ret = 0;
 
@@ -1783,7 +1761,7 @@ static int msm_compr_playback_free(struct snd_compr_stream *cstream)
 	int dir = IN, ret = 0, stream_id;
 	unsigned long flags;
 	uint32_t stream_index;
-	ion_phys_addr_t paddr = 0;
+	ion_phys_addr_t paddr;
 	size_t pa_len = 0;
 
 	pr_debug("%s\n", __func__);
@@ -1851,6 +1829,7 @@ static int msm_compr_playback_free(struct snd_compr_stream *cstream)
 	}
 	spin_unlock_irqrestore(&prtd->lock, flags);
 
+	mutex_lock(&pdata->lock);
 	pdata->cstream[soc_prtd->dai_link->be_id] = NULL;
 	if (cstream->direction == SND_COMPRESS_PLAYBACK) {
 		msm_pcm_routing_dereg_phy_stream(soc_prtd->dai_link->be_id,
@@ -1880,6 +1859,7 @@ static int msm_compr_playback_free(struct snd_compr_stream *cstream)
 	pdata->is_in_use[soc_prtd->dai_link->be_id] = false;
 	kfree(prtd);
 	runtime->private_data = NULL;
+	mutex_unlock(&pdata->lock);
 
 	return 0;
 }
@@ -1930,6 +1910,7 @@ static int msm_compr_capture_free(struct snd_compr_stream *cstream)
 	}
 	spin_unlock_irqrestore(&prtd->lock, flags);
 
+	mutex_lock(&pdata->lock);
 	pdata->cstream[soc_prtd->dai_link->be_id] = NULL;
 	msm_pcm_routing_dereg_phy_stream(soc_prtd->dai_link->be_id,
 					SNDRV_PCM_STREAM_CAPTURE);
@@ -1940,6 +1921,7 @@ static int msm_compr_capture_free(struct snd_compr_stream *cstream)
 
 	kfree(prtd);
 	runtime->private_data = NULL;
+	mutex_unlock(&pdata->lock);
 
 	return 0;
 }
@@ -2127,12 +2109,6 @@ static int msm_compr_set_params(struct snd_compr_stream *cstream,
 	case SND_AUDIOCODEC_APTX: {
 		pr_debug("%s: SND_AUDIOCODEC_APTX\n", __func__);
 		prtd->codec = FORMAT_APTX;
-		break;
-	}
-
-	case SND_AUDIOCODEC_APTXHD: {
-		pr_debug("%s: SND_AUDIOCODEC_APTXHD\n", __func__);
-		prtd->codec = FORMAT_APTXHD;
 		break;
 	}
 
@@ -2660,14 +2636,7 @@ static int msm_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 
 		pr_debug("%s: open_write stream_id %d bits_per_sample %d",
 				__func__, stream_id, bits_per_sample);
-		if (pdata->avs_ver &&
-			(q6core_get_avs_version() == Q6_SUBSYS_AVS2_7))
-			rc = q6asm_stream_open_write_v3(prtd->audio_client,
-				prtd->codec, bits_per_sample,
-				stream_id,
-				prtd->gapless_state.use_dsp_gapless_mode);
-		else
-			rc = q6asm_stream_open_write_v4(prtd->audio_client,
+		rc = q6asm_stream_open_write_v4(prtd->audio_client,
 				prtd->codec, bits_per_sample,
 				stream_id,
 				prtd->gapless_state.use_dsp_gapless_mode);
@@ -3011,7 +2980,6 @@ static int msm_compr_get_codec_caps(struct snd_compr_stream *cstream,
 	case SND_AUDIOCODEC_TRUEHD:
 	case SND_AUDIOCODEC_IEC61937:
 	case SND_AUDIOCODEC_APTX:
-	case SND_AUDIOCODEC_APTXHD:
 		break;
 	default:
 		pr_err("%s: Unsupported audio codec %d\n",
@@ -3228,6 +3196,7 @@ static int msm_compr_audio_effects_config_put(struct snd_kcontrol *kcontrol,
 	struct msm_compr_audio *prtd = NULL;
 	long *values = &(ucontrol->value.integer.value[0]);
 	int effects_module;
+	int ret = 0;
 
 	pr_debug("%s\n", __func__);
 	if (fe_id >= MSM_FRONTEND_DAI_MAX) {
@@ -3235,21 +3204,25 @@ static int msm_compr_audio_effects_config_put(struct snd_kcontrol *kcontrol,
 			__func__, fe_id);
 		return -EINVAL;
 	}
+
+	mutex_lock(&pdata->lock);
 	cstream = pdata->cstream[fe_id];
 	audio_effects = pdata->audio_effects[fe_id];
 	if (!cstream || !audio_effects) {
 		pr_err("%s: stream or effects inactive\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto done;
 	}
 	prtd = cstream->runtime->private_data;
 	if (!prtd) {
 		pr_err("%s: cannot set audio effects\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto done;
 	}
 	if (prtd->compr_passthr != LEGACY_PCM) {
 		pr_debug("%s: No effects for compr_type[%d]\n",
 			__func__, prtd->compr_passthr);
-		return 0;
+		goto done;
 	} else {
 		pr_debug("%s: Effects supported for compr_type[%d]\n",
 			 __func__, prtd->compr_passthr);
@@ -3310,9 +3283,11 @@ static int msm_compr_audio_effects_config_put(struct snd_kcontrol *kcontrol,
 		break;
 	default:
 		pr_err("%s Invalid effects config module\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
 	}
-	return 0;
+done:
+	mutex_unlock(&pdata->lock);
+	return ret;
 }
 
 static int msm_compr_audio_effects_config_get(struct snd_kcontrol *kcontrol,
@@ -3325,6 +3300,7 @@ static int msm_compr_audio_effects_config_get(struct snd_kcontrol *kcontrol,
 	struct msm_compr_audio_effects *audio_effects = NULL;
 	struct snd_compr_stream *cstream = NULL;
 	struct msm_compr_audio *prtd = NULL;
+	int ret = 0;
 
 	pr_debug("%s\n", __func__);
 	if (fe_id >= MSM_FRONTEND_DAI_MAX) {
@@ -3332,19 +3308,23 @@ static int msm_compr_audio_effects_config_get(struct snd_kcontrol *kcontrol,
 			__func__, fe_id);
 		return -EINVAL;
 	}
+	mutex_lock(&pdata->lock);
 	cstream = pdata->cstream[fe_id];
 	audio_effects = pdata->audio_effects[fe_id];
 	if (!cstream || !audio_effects) {
 		pr_err("%s: stream or effects inactive\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto done;
 	}
 	prtd = cstream->runtime->private_data;
 	if (!prtd) {
 		pr_err("%s: cannot set audio effects\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto done;
 	}
-
-	return 0;
+done:
+	mutex_unlock(&pdata->lock);
+	return ret;
 }
 
 static int msm_compr_query_audio_effect_put(struct snd_kcontrol *kcontrol,
@@ -3357,6 +3337,7 @@ static int msm_compr_query_audio_effect_put(struct snd_kcontrol *kcontrol,
 	struct msm_compr_audio_effects *audio_effects = NULL;
 	struct snd_compr_stream *cstream = NULL;
 	struct msm_compr_audio *prtd = NULL;
+	int ret = 0;
 	long *values = &(ucontrol->value.integer.value[0]);
 
 	if (fe_id >= MSM_FRONTEND_DAI_MAX) {
@@ -3364,28 +3345,34 @@ static int msm_compr_query_audio_effect_put(struct snd_kcontrol *kcontrol,
 			__func__, fe_id);
 		return -EINVAL;
 	}
+	mutex_lock(&pdata->lock);
 	cstream = pdata->cstream[fe_id];
 	audio_effects = pdata->audio_effects[fe_id];
 	if (!cstream || !audio_effects) {
 		pr_err("%s: stream or effects inactive\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto done;
 	}
 	prtd = cstream->runtime->private_data;
 	if (!prtd) {
 		pr_err("%s: cannot set audio effects\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto done;
 	}
 	if (prtd->compr_passthr != LEGACY_PCM) {
 		pr_err("%s: No effects for compr_type[%d]\n",
 			__func__, prtd->compr_passthr);
-		return -EPERM;
+		ret = -EPERM;
+		goto done;
 	}
 	audio_effects->query.mod_id = (u32)*values++;
 	audio_effects->query.parm_id = (u32)*values++;
 	audio_effects->query.size = (u32)*values++;
 	audio_effects->query.offset = (u32)*values++;
 	audio_effects->query.device = (u32)*values++;
-	return 0;
+done:
+	mutex_unlock(&pdata->lock);
+	return ret;
 }
 
 static int msm_compr_query_audio_effect_get(struct snd_kcontrol *kcontrol,
@@ -3398,6 +3385,7 @@ static int msm_compr_query_audio_effect_get(struct snd_kcontrol *kcontrol,
 	struct msm_compr_audio_effects *audio_effects = NULL;
 	struct snd_compr_stream *cstream = NULL;
 	struct msm_compr_audio *prtd = NULL;
+	int ret = 0;
 	long *values = &(ucontrol->value.integer.value[0]);
 
 	if (fe_id >= MSM_FRONTEND_DAI_MAX) {
@@ -3405,23 +3393,29 @@ static int msm_compr_query_audio_effect_get(struct snd_kcontrol *kcontrol,
 			__func__, fe_id);
 		return -EINVAL;
 	}
+
+	mutex_lock(&pdata->lock);
 	cstream = pdata->cstream[fe_id];
 	audio_effects = pdata->audio_effects[fe_id];
 	if (!cstream || !audio_effects) {
 		pr_debug("%s: stream or effects inactive\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto done;
 	}
 	prtd = cstream->runtime->private_data;
 	if (!prtd) {
 		pr_err("%s: cannot set audio effects\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto done;
 	}
 	values[0] = (long)audio_effects->query.mod_id;
 	values[1] = (long)audio_effects->query.parm_id;
 	values[2] = (long)audio_effects->query.size;
 	values[3] = (long)audio_effects->query.offset;
 	values[4] = (long)audio_effects->query.device;
-	return 0;
+done:
+	mutex_unlock(&pdata->lock);
+	return ret;
 }
 
 static int msm_compr_send_dec_params(struct snd_compr_stream *cstream,
@@ -3450,7 +3444,6 @@ static int msm_compr_send_dec_params(struct snd_compr_stream *cstream,
 	case FORMAT_TRUEHD:
 	case FORMAT_IEC61937:
 	case FORMAT_APTX:
-	case FORMAT_APTXHD:
 		pr_debug("%s: no runtime parameters for codec: %d\n", __func__,
 			 prtd->codec);
 		break;
@@ -3489,8 +3482,7 @@ static int msm_compr_dec_params_put(struct snd_kcontrol *kcontrol,
 	if (fe_id >= MSM_FRONTEND_DAI_MAX) {
 		pr_err("%s Received out of bounds fe_id %lu\n",
 			__func__, fe_id);
-		rc = -EINVAL;
-		goto end;
+		return -EINVAL;
 	}
 
 	cstream = pdata->cstream[fe_id];
@@ -3498,16 +3490,15 @@ static int msm_compr_dec_params_put(struct snd_kcontrol *kcontrol,
 
 	if (!cstream || !dec_params) {
 		pr_err("%s: stream or dec_params inactive\n", __func__);
-		rc = -EINVAL;
-		goto end;
+		return -EINVAL;
 	}
 	prtd = cstream->runtime->private_data;
 	if (!prtd) {
 		pr_err("%s: cannot set dec_params\n", __func__);
-		rc = -EINVAL;
-		goto end;
+		return -EINVAL;
 	}
 
+	mutex_lock(&pdata->lock);
 	switch (prtd->codec) {
 	case FORMAT_MP3:
 	case FORMAT_MPEG4_AAC:
@@ -3520,7 +3511,6 @@ static int msm_compr_dec_params_put(struct snd_kcontrol *kcontrol,
 	case FORMAT_TRUEHD:
 	case FORMAT_IEC61937:
 	case FORMAT_APTX:
-	case FORMAT_APTXHD:
 		pr_debug("%s: no runtime parameters for codec: %d\n", __func__,
 			 prtd->codec);
 		break;
@@ -3556,6 +3546,7 @@ static int msm_compr_dec_params_put(struct snd_kcontrol *kcontrol,
 	}
 end:
 	pr_debug("%s: ret %d\n", __func__, rc);
+	mutex_unlock(&pdata->lock);
 	return rc;
 }
 
@@ -4093,6 +4084,7 @@ static int msm_compr_probe(struct snd_soc_platform *platform)
 	if (!pdata)
 		return -ENOMEM;
 
+	mutex_init(&pdata->lock);
 	snd_soc_platform_set_drvdata(platform, pdata);
 
 	for (i = 0; i < MSM_FRONTEND_DAI_MAX; i++) {
@@ -4119,15 +4111,6 @@ static int msm_compr_probe(struct snd_soc_platform *platform)
 		pdata->use_legacy_api = false;
 
 	pr_debug("%s: use legacy api %d\n", __func__, pdata->use_legacy_api);
-
-	if (of_property_read_bool(platform->dev->of_node,
-				"qcom,avs-version"))
-		pdata->avs_ver = true;
-	else
-		pdata->avs_ver = false;
-
-	pr_debug("%s: avs_ver = %d\n", __func__, pdata->avs_ver);
-
 	/*
 	 * use_dsp_gapless_mode part of platform data(pdata) is updated from HAL
 	 * through a mixer control before compress driver is opened. The mixer
@@ -4135,6 +4118,21 @@ static int msm_compr_probe(struct snd_soc_platform *platform)
 	 * Gapless is disabled by default.
 	 */
 	pdata->use_dsp_gapless_mode = false;
+	return 0;
+}
+
+static int msm_compr_remove(struct snd_soc_platform *platform)
+{
+
+	struct msm_compr_pdata *pdata = (struct msm_compr_pdata *)
+		snd_soc_platform_get_drvdata(platform);
+	if (!pdata) {
+		pr_err("%s pdata is null\n", __func__);
+		return -ENOMEM;
+	}
+
+	mutex_destroy(&pdata->lock);
+	kfree(pdata);
 	return 0;
 }
 
@@ -4900,6 +4898,7 @@ static struct snd_soc_platform_driver msm_soc_platform = {
 	.probe		= msm_compr_probe,
 	.compr_ops	= &msm_compr_ops,
 	.pcm_new	= msm_compr_new,
+	.remove		= msm_compr_remove,
 };
 
 static int msm_compr_dev_probe(struct platform_device *pdev)
@@ -4910,7 +4909,7 @@ static int msm_compr_dev_probe(struct platform_device *pdev)
 					&msm_soc_platform);
 }
 
-static int msm_compr_remove(struct platform_device *pdev)
+static int msm_compr_dev_remove(struct platform_device *pdev)
 {
 	snd_soc_unregister_platform(&pdev->dev);
 	return 0;
@@ -4929,7 +4928,7 @@ static struct platform_driver msm_compr_driver = {
 		.of_match_table = msm_compr_dt_match,
 	},
 	.probe = msm_compr_dev_probe,
-	.remove = msm_compr_remove,
+	.remove = msm_compr_dev_remove,
 };
 
 static int __init msm_soc_platform_init(void)

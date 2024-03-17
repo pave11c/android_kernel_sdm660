@@ -33,8 +33,6 @@
 #define UHS_SDR25_MIN_DTR	(25 * 1000 * 1000)
 #define UHS_SDR12_MIN_DTR	(12.5 * 1000 * 1000)
 
-#define ENOCALLBACK 1
-
 static const unsigned int tran_exp[] = {
 	10000,		100000,		1000000,	10000000,
 	0,		0,		0,		0
@@ -224,14 +222,6 @@ static int mmc_decode_scr(struct mmc_card *card)
 
 	if (scr->sda_spec3)
 		scr->cmds = UNSTUFF_BITS(resp, 32, 2);
-
-	/* SD Spec says: any SD Card shall set at least bits 0 and 2 */
-	if (!(scr->bus_widths & SD_SCR_BUS_WIDTH_1) ||
-	    !(scr->bus_widths & SD_SCR_BUS_WIDTH_4)) {
-		pr_err("%s: invalid bus width\n", mmc_hostname(card->host));
-		return -EINVAL;
-	}
-
 	return 0;
 }
 
@@ -508,11 +498,7 @@ static int sd_set_bus_speed_mode(struct mmc_card *card, u8 *status)
 		err = -EBUSY;
 	} else {
 		mmc_set_timing(card->host, timing);
-		if (card->host->ops->check_temp(card->host) &&
-				timing == MMC_TIMING_UHS_SDR104)
-			mmc_set_clock(card->host, UHS_SDR50_MAX_DTR);
-		else
-			mmc_set_clock(card->host, card->sw_caps.uhs_max_dtr);
+		mmc_set_clock(card->host, card->sw_caps.uhs_max_dtr);
 	}
 
 	return err;
@@ -1136,34 +1122,6 @@ free_card:
 	return err;
 }
 
-static int mmc_sd_init_temp_control_clk_scaling(struct mmc_host *host)
-{
-	int ret;
-
-	if (host->ops->reg_temp_callback) {
-		ret = host->ops->reg_temp_callback(host);
-	} else {
-		pr_err("%s: %s: couldn't find init temp control clk scaling cb\n",
-			mmc_hostname(host), __func__);
-		ret = -ENOCALLBACK;
-	}
-	return ret;
-}
-
-static int mmc_sd_dereg_temp_control_clk_scaling(struct mmc_host *host)
-{
-	int ret;
-
-	if (host->ops->dereg_temp_callback) {
-		ret = host->ops->dereg_temp_callback(host);
-	} else {
-		pr_err("%s: %s: couldn't find dereg temp control clk scaling cb\n",
-			mmc_hostname(host), __func__);
-		ret = -ENOCALLBACK;
-	}
-	return ret;
-}
-
 /*
  * Host is being removed. Free up the current card.
  */
@@ -1173,7 +1131,6 @@ static void mmc_sd_remove(struct mmc_host *host)
 	BUG_ON(!host->card);
 
 	mmc_exit_clk_scaling(host);
-	mmc_sd_dereg_temp_control_clk_scaling(host);
 	mmc_remove_card(host->card);
 
 	mmc_claim_host(host);
@@ -1205,12 +1162,6 @@ static void mmc_sd_detect(struct mmc_host *host)
 	BUG_ON(!host);
 	BUG_ON(!host->card);
 
-    #ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME 
-    if (mmc_bus_needs_resume(host)) 
-        mmc_resume_bus(host); 
-    #endif 
-    mmc_power_up(host, host->ocr_avail);
-    
 	/*
 	 * Try to acquire claim host. If failed to get the lock in 2 sec,
 	 * just return; This is to ensure that when this call is invoked
@@ -1306,7 +1257,7 @@ out:
 static int mmc_sd_suspend(struct mmc_host *host)
 {
 	int err;
-    
+
 	MMC_TRACE(host, "%s: Enter\n", __func__);
 	err = _mmc_sd_suspend(host);
 	if (!err) {
@@ -1317,7 +1268,7 @@ static int mmc_sd_suspend(struct mmc_host *host)
 		host->ignore_bus_resume_flags = true;
 
 	MMC_TRACE(host, "%s: Exit err: %d\n", __func__, err);
-    
+
 	return err;
 }
 
@@ -1394,6 +1345,7 @@ out:
 static int mmc_sd_resume(struct mmc_host *host)
 {
 	int err = 0;
+
 	MMC_TRACE(host, "%s: Enter\n", __func__);
 	if (!(host->caps & MMC_CAP_RUNTIME_RESUME)) {
 		err = _mmc_sd_resume(host);
@@ -1496,12 +1448,6 @@ int mmc_attach_sd(struct mmc_host *host)
 			goto err;
 	}
 
-	/*
-	 * Some SD cards claims an out of spec VDD voltage range. Let's treat
-	 * these bits as being in-valid and especially also bit7.
-	 */
-	ocr &= ~0x7FFF;
-
 	rocr = mmc_select_voltage(host, ocr);
 
 	/*
@@ -1512,9 +1458,6 @@ int mmc_attach_sd(struct mmc_host *host)
 		goto err;
 	}
 
-	if (mmc_sd_init_temp_control_clk_scaling(host))
-		pr_err("%s: failed to init temp control clk scaling\n",
-			mmc_hostname(host));
 	/*
 	 * Detect and init the card.
 	 */
@@ -1568,7 +1511,6 @@ err:
 
 	pr_err("%s: error %d whilst initialising SD card\n",
 		mmc_hostname(host), err);
-	printk ("BBox::UEC; 43::3\n");
 
 	return err;
 }

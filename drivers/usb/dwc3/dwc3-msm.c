@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -65,9 +65,6 @@
 
 /* AHB2PHY read/write waite value */
 #define ONE_READ_WRITE_WAIT 0x11
-
-/* DP_DM linestate float */
-#define DP_DM_STATE_FLOAT 0x02
 
 /* cpu to fix usb interrupt */
 static int cpu_to_affin;
@@ -252,8 +249,6 @@ struct dwc3_msm {
 	bool			hc_died;
 	bool			xhci_ss_compliance_enable;
 	bool			no_wakeup_src_in_hostmode;
-	bool			check_for_float;
-	bool			float_detected;
 
 	struct extcon_dev	*extcon_vbus;
 	struct extcon_dev	*extcon_id;
@@ -1169,8 +1164,7 @@ static void gsi_configure_ep(struct usb_ep *ep, struct usb_gsi_request *request)
 	struct dwc3_gadget_ep_cmd_params params;
 	const struct usb_endpoint_descriptor *desc = ep->desc;
 	const struct usb_ss_ep_comp_descriptor *comp_desc = ep->comp_desc;
-	u32 reg;
-	int ret;
+	u32			reg;
 
 	memset(&params, 0x00, sizeof(params));
 
@@ -1219,10 +1213,6 @@ static void gsi_configure_ep(struct usb_ep *ep, struct usb_gsi_request *request)
 
 	/* Set XferRsc Index for GSI EP */
 	if (!(dep->flags & DWC3_EP_ENABLED)) {
-		ret = dwc3_gadget_resize_tx_fifos(dwc, dep);
-		if (ret)
-			return;
-
 		memset(&params, 0x00, sizeof(params));
 		params.param0 = DWC3_DEPXFERCFG_NUM_XFER_RES(1);
 		dwc3_send_gadget_ep_cmd(dwc, dep->number,
@@ -2178,8 +2168,8 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc, bool hibernation)
 	clk_disable_unprepare(mdwc->xo_clk);
 
 	/* Perform controller power collapse */
-	if ((!mdwc->in_host_mode && (!mdwc->in_device_mode || mdwc->in_restart))
-							|| hibernation) {
+	if ((!mdwc->in_host_mode && (!mdwc->in_device_mode ||
+				mdwc->in_restart)) || hibernation) {
 		mdwc->lpm_flags |= MDWC3_POWER_COLLAPSE;
 		dev_dbg(mdwc->dev, "%s: power collapse\n", __func__);
 		dwc3_msm_config_gdsc(mdwc, 0);
@@ -2225,12 +2215,12 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc, bool hibernation)
 	}
 
 	dev_info(mdwc->dev, "DWC3 in low power mode\n");
-	dbg_event(0xFF, "Ctl Sus", atomic_read(&dwc->in_lpm));
 
 	/* kick_sm if it is waiting for lpm sequence to finish */
 	if (test_and_clear_bit(WAIT_FOR_LPM, &mdwc->inputs))
 		schedule_delayed_work(&mdwc->sm_work, 0);
 
+	dbg_event(0xFF, "Ctl Sus", atomic_read(&dwc->in_lpm));
 	mutex_unlock(&mdwc->suspend_resume_mutex);
 
 	return 0;
@@ -2764,7 +2754,6 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 	if (mdwc->vbus_active == event)
 		return NOTIFY_DONE;
 
-	mdwc->float_detected = false;
 	cc_state = extcon_get_cable_state_(edev, EXTCON_USB_CC);
 	if (cc_state < 0)
 		mdwc->typec_orientation = ORIENTATION_NONE;
@@ -3313,8 +3302,6 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	if (of_property_read_bool(node, "qcom,disable-dev-mode-pm"))
 		pm_runtime_get_noresume(mdwc->dev);
 
-	mdwc->check_for_float = of_property_read_bool(node,
-					"qcom,check-for-float");
 	ret = dwc3_msm_extcon_register(mdwc);
 	if (ret)
 		goto put_dwc3;
@@ -3869,8 +3856,7 @@ static int dwc3_msm_gadget_vbus_draw(struct dwc3_msm *mdwc, unsigned mA)
 	int ret, psy_type;
 
 	psy_type = get_psy_type(mdwc);
-	if (psy_type == POWER_SUPPLY_TYPE_USB_FLOAT
-		|| (mdwc->check_for_float && mdwc->float_detected)) {
+	if (psy_type == POWER_SUPPLY_TYPE_USB_FLOAT) {
 		if (!mA)
 			pval.intval = -ETIMEDOUT;
 		else
@@ -3961,7 +3947,6 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			work = 1;
 		} else if (test_bit(B_SESS_VLD, &mdwc->inputs)) {
 			dev_dbg(mdwc->dev, "b_sess_vld\n");
-			mdwc->float_detected = false;
 			if (get_psy_type(mdwc) == POWER_SUPPLY_TYPE_USB_FLOAT)
 				queue_delayed_work(mdwc->dwc3_wq,
 						&mdwc->sdp_check,
@@ -3974,21 +3959,6 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			pm_runtime_get_sync(mdwc->dev);
 			dbg_event(0xFF, "BIDLE gsync",
 				atomic_read(&mdwc->dev->power.usage_count));
-			if (mdwc->check_for_float) {
-				/*
-				 * If DP_DM are found to be floating, do not
-				 * start the peripheral mode.
-				 */
-				if (usb_phy_dpdm_with_idp_src(mdwc->hs_phy) ==
-							DP_DM_STATE_FLOAT) {
-					mdwc->float_detected = true;
-					dwc3_msm_gadget_vbus_draw(mdwc, 0);
-					pm_runtime_put_sync(mdwc->dev);
-					dbg_event(0xFF, "FLT sync", atomic_read(
-						&mdwc->dev->power.usage_count));
-					break;
-				}
-			}
 			dwc3_otg_start_peripheral(mdwc, 1);
 			mdwc->drd_state = DRD_STATE_PERIPHERAL;
 			work = 1;
@@ -4150,10 +4120,6 @@ static int dwc3_msm_pm_prepare(struct device *dev)
 }
 
 #ifdef CONFIG_PM_SLEEP
-#ifdef CONFIG_FIH_MT_SLEEP
-extern int ftm_sleep_test;
-#endif
-
 static int dwc3_msm_pm_suspend(struct device *dev)
 {
 	int ret = 0;
@@ -4164,24 +4130,16 @@ static int dwc3_msm_pm_suspend(struct device *dev)
 	dbg_event(0xFF, "PM Sus", 0);
 
 	flush_workqueue(mdwc->dwc3_wq);
-#ifdef CONFIG_FIH_MT_SLEEP
-	pr_info("%s atomic_read(&dwc->in_lpm)=%d, ftm_sleep_test=%d\n", __func__, atomic_read(&dwc->in_lpm), ftm_sleep_test);
-	if (!atomic_read(&dwc->in_lpm) && !mdwc->no_wakeup_src_in_hostmode && !ftm_sleep_test) {
-#else
 	if (!atomic_read(&dwc->in_lpm) && !mdwc->no_wakeup_src_in_hostmode) {
-#endif
 		dev_err(mdwc->dev, "Abort PM suspend!! (USB is outside LPM)\n");
 		return -EBUSY;
 	}
 
 	ret = dwc3_msm_suspend(mdwc, false);
-	if (ret)
-		return ret;
+	if (!ret)
+		atomic_set(&mdwc->pm_suspended, 1);
 
-	flush_work(&mdwc->bus_vote_w);
-	atomic_set(&mdwc->pm_suspended, 1);
-
-	return 0;
+	return ret;
 }
 
 static int dwc3_msm_pm_freeze(struct device *dev)
@@ -4209,19 +4167,11 @@ static int dwc3_msm_pm_freeze(struct device *dev)
 
 	mdwc->hs_phy->flags &= ~PHY_HOST_MODE;
 
-#ifdef CONFIG_FIH_MT_SLEEP
-	if (ftm_sleep_test) {
-		mdwc->resume_pending = true;
-	}
-#endif
 	ret = dwc3_msm_suspend(mdwc, true);
-	if (ret)
-		return ret;
+	if (!ret)
+		atomic_set(&mdwc->pm_suspended, 1);
 
-	flush_work(&mdwc->bus_vote_w);
-	atomic_set(&mdwc->pm_suspended, 1);
-
-	return 0;
+	return ret;
 }
 
 static int dwc3_msm_pm_resume(struct device *dev)

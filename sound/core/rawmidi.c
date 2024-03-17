@@ -29,7 +29,6 @@
 #include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/delay.h>
-#include <linux/nospec.h>
 #include <sound/rawmidi.h>
 #include <sound/info.h>
 #include <sound/control.h>
@@ -593,7 +592,6 @@ static int __snd_rawmidi_info_select(struct snd_card *card,
 		return -ENXIO;
 	if (info->stream < 0 || info->stream > 1)
 		return -EINVAL;
-	info->stream = array_index_nospec(info->stream, 2);
 	pstr = &rmidi->streams[info->stream];
 	if (pstr->substream_count == 0)
 		return -ENOENT;
@@ -1008,9 +1006,6 @@ static long snd_rawmidi_kernel_read1(struct snd_rawmidi_substream *substream,
 		result += count1;
 		count -= count1;
 	}
-
-	if (userbuf)
-		mutex_unlock(&runtime->realloc_mutex);
 	spin_unlock_irqrestore(&runtime->lock, flags);
 	if (userbuf)
 		mutex_unlock(&runtime->realloc_mutex);
@@ -1074,7 +1069,6 @@ static ssize_t snd_rawmidi_read(struct file *file, char __user *buf, size_t coun
 		buf += count1;
 		count -= count1;
 	}
-
 	return result;
 }
 

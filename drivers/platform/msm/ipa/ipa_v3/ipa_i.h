@@ -1296,7 +1296,6 @@ struct ipa3_context {
 	struct ipa_cne_evt ipa_cne_evt_req_cache[IPA_MAX_NUM_REQ_CACHE];
 	int num_ipa_cne_evt_req;
 	struct mutex ipa_cne_evt_lock;
-	bool fw_loaded;
 };
 
 /**
@@ -2125,5 +2124,6 @@ struct dentry *ipa_debugfs_get_root(void);
 bool ipa3_is_msm_device(void);
 struct device *ipa3_get_pdev(void);
 int ipa3_allocate_dma_task_for_gsi(void);
+bool ipa3_check_idr_if_freed(void *ptr);
 void ipa3_free_dma_task_for_gsi(void);
 #endif /* _IPA3_I_H_ */

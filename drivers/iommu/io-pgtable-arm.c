@@ -492,8 +492,12 @@ static int __arm_lpae_map(struct arm_lpae_io_pgtable *data, unsigned long iova,
 		if (cfg->quirks & IO_PGTABLE_QUIRK_ARM_NS)
 			pte |= ARM_LPAE_PTE_NSTABLE;
 		__arm_lpae_set_pte(ptep, pte, cfg);
-	} else {
+	} else if (!iopte_leaf(pte, lvl)) {
 		cptep = iopte_deref(pte, data);
+	} else {
+		/* We require an unmap first */
+		WARN_ON(!selftest_running);
+		return -EEXIST;
 	}
 
 	/* Rinse, repeat */
@@ -638,9 +642,11 @@ static int arm_lpae_map_sg(struct io_pgtable_ops *ops, unsigned long iova,
 				arm_lpae_iopte *ptep = ms.pgtable +
 					ARM_LPAE_LVL_IDX(iova, MAP_STATE_LVL,
 							 data);
-				arm_lpae_init_pte(
+				ret = arm_lpae_init_pte(
 					data, iova, phys, prot, MAP_STATE_LVL,
 					ptep, ms.prev_pgtable, false);
+				if (ret)
+					goto out_err;
 				ms.num_pte++;
 			} else {
 				ret = __arm_lpae_map(data, iova, phys, pgsize,
