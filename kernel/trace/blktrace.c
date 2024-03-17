@@ -1877,10 +1877,6 @@ static ssize_t sysfs_blk_trace_attr_store(struct device *dev,
 	bt = rcu_dereference_protected(q->blk_trace,
 				       lockdep_is_held(&q->blk_trace_mutex));
 	if (attr == &dev_attr_enable) {
-		if (!!value == !!bt) {
-			ret = 0;
-			goto out_unlock_bdev;
-		}
 		if (value)
 			ret = blk_trace_setup_queue(q, bdev);
 		else

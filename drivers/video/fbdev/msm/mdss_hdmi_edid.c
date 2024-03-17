@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2017,2019-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -235,6 +235,7 @@ int hdmi_edid_reset_parser(void *input)
 
 	/* reset resolution related sink data */
 	memset(&edid_ctrl->sink_data, 0, sizeof(edid_ctrl->sink_data));
+	memset(&edid_ctrl->sink_caps, 0, sizeof(edid_ctrl->sink_caps));
 
 	/* reset audio related data */
 	memset(edid_ctrl->audio_data_block, 0,

@@ -585,25 +585,12 @@ static int wdm_wait_for_response(struct file *file, long timeout)
 	struct wdm_device *desc = file->private_data;
 	long rv; /* Use long here because (int) MAX_SCHEDULE_TIMEOUT < 0. */
 
-	/*
-	 * Needs both flags. We cannot do with one because resetting it would
-	 * cause a race with write() yet we need to signal a disconnect.
-	 */
-	rv = wait_event_interruptible_timeout(desc->wait,
-			      !test_bit(WDM_IN_USE, &desc->flags) ||
-			      test_bit(WDM_DISCONNECTING, &desc->flags),
-			      timeout);
+	wait_event(desc->wait, !test_bit(WDM_IN_USE, &desc->flags));
 
-	/*
-	 * To report the correct error. This is best effort.
-	 * We are inevitably racing with the hardware.
-	 */
-	if (test_bit(WDM_DISCONNECTING, &desc->flags))
-		return -ENODEV;
-	if (!rv)
-		return -EIO;
-	if (rv < 0)
-		return -EINTR;
+	/* cannot dereference desc->intf if WDM_DISCONNECTING */
+	if (desc->werr < 0 && !test_bit(WDM_DISCONNECTING, &desc->flags))
+		dev_err(&desc->intf->dev, "Error in flush path: %d\n",
+			desc->werr);
 
 	spin_lock_irq(&desc->iuspin);
 	rv = desc->werr;
@@ -1016,6 +1003,8 @@ static void wdm_disconnect(struct usb_interface *intf)
 	spin_lock_irqsave(&desc->iuspin, flags);
 	set_bit(WDM_DISCONNECTING, &desc->flags);
 	set_bit(WDM_READ, &desc->flags);
+	/* to terminate pending flushes */
+	clear_bit(WDM_IN_USE, &desc->flags);
 	spin_unlock_irqrestore(&desc->iuspin, flags);
 	wake_up_all(&desc->wait);
 	mutex_lock(&desc->rlock);

@@ -163,9 +163,6 @@ static int l2tp_ip_recv(struct sk_buff *skb)
 		print_hex_dump_bytes("", DUMP_PREFIX_OFFSET, ptr, length);
 	}
 
-	if (l2tp_v3_ensure_opt_in_linear(session, skb, &ptr, &optr))
-		goto discard;
-
 	l2tp_recv_common(session, skb, ptr, optr, 0, skb->len, tunnel->recv_payload_hook);
 	l2tp_session_dec_refcount(session);
 
@@ -180,16 +177,24 @@ pass_up:
 		goto discard;
 
 	tunnel_id = ntohl(*(__be32 *) &skb->data[4]);
-	iph = (struct iphdr *)skb_network_header(skb);
+	tunnel = l2tp_tunnel_find(net, tunnel_id);
+	if (tunnel != NULL)
+		sk = tunnel->sock;
+	else {
+		struct iphdr *iph = (struct iphdr *) skb_network_header(skb);
 
-	read_lock_bh(&l2tp_ip_lock);
-	sk = __l2tp_ip_bind_lookup(net, iph->daddr, 0, tunnel_id);
-	if (!sk) {
+		read_lock_bh(&l2tp_ip_lock);
+		sk = __l2tp_ip_bind_lookup(net, iph->daddr, 0, tunnel_id);
 		read_unlock_bh(&l2tp_ip_lock);
 		goto discard;
 	}
 	sock_hold(sk);
 	read_unlock_bh(&l2tp_ip_lock);
+
+	if (sk == NULL)
+		goto discard;
+
+	sock_hold(sk);
 
 	if (!xfrm4_policy_check(sk, XFRM_POLICY_IN, skb))
 		goto discard_put;

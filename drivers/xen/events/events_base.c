@@ -184,7 +184,7 @@ static int set_evtchn_to_irq(unsigned evtchn, unsigned irq)
 			free_page((unsigned long) evtchn_row);
 	}
 
-	WRITE_ONCE(evtchn_to_irq[row][col], irq);
+	evtchn_to_irq[EVTCHN_ROW(evtchn)][EVTCHN_COL(evtchn)] = irq;
 	return 0;
 }
 

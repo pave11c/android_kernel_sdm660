@@ -80,7 +80,6 @@ deps_config := \
 	fs/sysfs/Kconfig \
 	fs/kernfs/Kconfig \
 	fs/proc/Kconfig \
-	fs/exfat/Kconfig \
 	fs/ntfs/Kconfig \
 	fs/fat/Kconfig \
 	fs/udf/Kconfig \
@@ -110,8 +109,6 @@ deps_config := \
 	fs/Kconfig \
 	drivers/acpi/apei/Kconfig \
 	drivers/acpi/Kconfig \
-	drivers/haptics/Kconfig \
-	drivers/fih/Kconfig \
 	drivers/tee/optee/Kconfig \
 	drivers/tee/Kconfig \
 	drivers/sensors/Kconfig \
@@ -377,8 +374,6 @@ deps_config := \
 	drivers/hid/Kconfig \
 	sound/oss/Kconfig \
 	sound/soc/generic/Kconfig \
-	sound/soc/codecs/tfa9891/Kconfig \
-	sound/soc/codecs/tas2557/Kconfig \
 	sound/soc/codecs/msm_sdw/Kconfig \
 	sound/soc/codecs/sdm660_cdc/Kconfig \
 	sound/soc/codecs/Kconfig \
@@ -441,10 +436,8 @@ deps_config := \
 	sound/Kconfig \
 	drivers/video/logo/Kconfig \
 	drivers/video/console/Kconfig \
-	drivers/video/boost/Kconfig \
 	drivers/video/adf/Kconfig \
 	drivers/video/backlight/Kconfig \
-	drivers/video/fbdev/msm/fih/Kconfig \
 	drivers/video/fbdev/msm/msm_dba/Kconfig \
 	drivers/video/fbdev/msm/Kconfig \
 	drivers/video/fbdev/mmp/fb/Kconfig \
@@ -671,17 +664,9 @@ deps_config := \
 	drivers/char/Kconfig \
 	drivers/input/gameport/Kconfig \
 	drivers/input/serio/Kconfig \
-	drivers/input/fingerprint/elan/Kconfig \
-	drivers/input/fingerprint/goodix_gf5288/Kconfig \
-	drivers/input/fingerprint/Kconfig \
 	drivers/input/misc/ots_pat9125/Kconfig \
 	drivers/input/misc/Kconfig \
-	drivers/input/touchscreen/gt1x/Kconfig \
-	drivers/input/touchscreen/nt36xxx/Kconfig \
-	drivers/input/touchscreen/focaltech_touch/Kconfig \
 	drivers/input/touchscreen/st/Kconfig \
-	drivers/input/touchscreen/gt9xx/Kconfig \
-	drivers/input/touchscreen/ilitek/Kconfig \
 	drivers/input/touchscreen/synaptics_dsx/Kconfig \
 	drivers/input/touchscreen/Kconfig \
 	drivers/input/tablet/Kconfig \
@@ -938,7 +923,6 @@ deps_config := \
 	drivers/amba/Kconfig \
 	drivers/Kconfig \
 	net/ipc_router/Kconfig \
-	drivers/nfc/SecNfc/Kconfig \
 	drivers/nfc/s3fwrn5/Kconfig \
 	drivers/nfc/nxp-nci/Kconfig \
 	drivers/nfc/st-nci/Kconfig \
@@ -1068,7 +1052,7 @@ deps_config := \
 include/config/auto.conf: \
 	$(deps_config)
 
-ifneq "$(KERNELVERSION)" "4.4.302"
+ifneq "$(KERNELVERSION)" "4.4.153"
 include/config/auto.conf: FORCE
 endif
 ifneq "$(ARCH)" "arm64"

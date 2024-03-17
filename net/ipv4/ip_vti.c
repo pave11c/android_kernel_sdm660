@@ -78,49 +78,12 @@ drop:
 	return 0;
 }
 
-static int vti_input_proto(struct sk_buff *skb, int nexthdr, __be32 spi,
-			   int encap_type)
-{
-	return vti_input(skb, nexthdr, spi, encap_type, false);
-}
-
-static int vti_rcv(struct sk_buff *skb, __be32 spi, bool update_skb_dev)
+static int vti_rcv(struct sk_buff *skb)
 {
 	XFRM_SPI_SKB_CB(skb)->family = AF_INET;
 	XFRM_SPI_SKB_CB(skb)->daddroff = offsetof(struct iphdr, daddr);
 
-	return vti_input(skb, ip_hdr(skb)->protocol, spi, 0, update_skb_dev);
-}
-
-static int vti_rcv_proto(struct sk_buff *skb)
-{
-	return vti_rcv(skb, 0, false);
-}
-
-static int vti_rcv_tunnel(struct sk_buff *skb)
-{
-	struct ip_tunnel_net *itn = net_generic(dev_net(skb->dev), vti_net_id);
-	const struct iphdr *iph = ip_hdr(skb);
-	struct ip_tunnel *tunnel;
-
-	tunnel = ip_tunnel_lookup(itn, skb->dev->ifindex, TUNNEL_NO_KEY,
-				  iph->saddr, iph->daddr, 0);
-	if (tunnel) {
-		struct tnl_ptk_info tpi = {
-			.proto = htons(ETH_P_IP),
-		};
-
-		if (!xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb))
-			goto drop;
-		if (iptunnel_pull_header(skb, 0, tpi.proto))
-			goto drop;
-		return ip_tunnel_rcv(tunnel, skb, &tpi, NULL, false);
-	}
-
-	return -EINVAL;
-drop:
-	kfree_skb(skb);
-	return 0;
+	return vti_input(skb, ip_hdr(skb)->protocol, 0, 0);
 }
 
 static int vti_rcv_cb(struct sk_buff *skb, int err)
@@ -480,12 +443,6 @@ static struct xfrm4_protocol vti_ipcomp4_protocol __read_mostly = {
 	.priority	=	100,
 };
 
-static struct xfrm_tunnel ipip_handler __read_mostly = {
-	.handler	=	vti_rcv_tunnel,
-	.err_handler	=	vti4_err,
-	.priority	=	0,
-};
-
 static int __net_init vti_init_net(struct net *net)
 {
 	int err;
@@ -668,11 +625,6 @@ static int __init vti_init(void)
 	err = xfrm4_protocol_register(&vti_ipcomp4_protocol, IPPROTO_COMP);
 	if (err < 0)
 		goto xfrm_proto_comp_failed;
-
-	msg = "ipip tunnel";
-	err = xfrm4_tunnel_register(&ipip_handler, AF_INET);
-	if (err < 0)
-		goto xfrm_tunnel_failed;
 
 	msg = "netlink interface";
 	err = rtnl_link_register(&vti_link_ops);

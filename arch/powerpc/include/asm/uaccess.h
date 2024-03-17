@@ -60,7 +60,7 @@
 #endif
 
 #define access_ok(type, addr, size)		\
-	(__chk_user_ptr(addr), (void)(type),		\
+	(__chk_user_ptr(addr),			\
 	 __access_ok((__force unsigned long)(addr), (size), get_fs()))
 
 /*
@@ -306,11 +306,7 @@ do {								\
 	__chk_user_ptr(__gu_addr);				\
 	if (!is_kernel_addr((unsigned long)__gu_addr))		\
 		might_fault();					\
-	barrier_nospec();					\
-	if (do_allow)								\
-		__get_user_size(__gu_val, __gu_addr, __gu_size, __gu_err);	\
-	else									\
-		__get_user_size_allowed(__gu_val, __gu_addr, __gu_size, __gu_err); \
+	__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
 	(x) = (__typeof__(*(ptr)))__gu_val;			\
 								\
 	__gu_err;						\
@@ -325,7 +321,6 @@ do {								\
 	__chk_user_ptr(ptr);					\
 	if (!is_kernel_addr((unsigned long)__gu_addr))		\
 		might_fault();					\
-	barrier_nospec();					\
 	__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
 	(x) = (__force __typeof__(*(ptr)))__gu_val;			\
 	__gu_err;						\
@@ -340,10 +335,8 @@ do {								\
 	__typeof__(size) __gu_size = (size);				\
 									\
 	might_fault();							\
-	if (access_ok(VERIFY_READ, __gu_addr, __gu_size)) {		\
-		barrier_nospec();					\
-		__get_user_size(__gu_val, __gu_addr, __gu_size, __gu_err); \
-	}								\
+	if (access_ok(VERIFY_READ, __gu_addr, (size)))			\
+		__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
 	(x) = (__force __typeof__(*(ptr)))__gu_val;				\
 									\
 	__gu_err;							\
@@ -354,11 +347,8 @@ do {								\
 	long __gu_err;						\
 	unsigned long __gu_val;					\
 	__typeof__(*(ptr)) __user *__gu_addr = (ptr);	\
-	__typeof__(size) __gu_size = (size);			\
-								\
-	__chk_user_ptr(__gu_addr);				\
-	barrier_nospec();					\
-	__get_user_size(__gu_val, __gu_addr, __gu_size, __gu_err); \
+	__chk_user_ptr(ptr);					\
+	__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
 	(x) = (__force __typeof__(*(ptr)))__gu_val;			\
 								\
 	__gu_err;						\
@@ -378,11 +368,8 @@ static inline unsigned long copy_from_user(void *to,
 	unsigned long ret;
 
 	if (likely(access_ok(VERIFY_READ, from, n))) {
-		allow_user_access(to, from, n);
-		barrier_nospec();
-		ret = __copy_tofrom_user((__force void __user *)to, from, n);
-		prevent_user_access(to, from, n);
-		return ret;
+		check_object_size(to, n, false);
+		return __copy_tofrom_user((__force void __user *)to, from, n);
 	}
 	memset(to, 0, n);
 	return n;
@@ -419,19 +406,15 @@ static inline unsigned long __copy_from_user_inatomic(void *to,
 
 		switch (n) {
 		case 1:
-			barrier_nospec();
 			__get_user_size(*(u8 *)to, from, 1, ret);
 			break;
 		case 2:
-			barrier_nospec();
 			__get_user_size(*(u16 *)to, from, 2, ret);
 			break;
 		case 4:
-			barrier_nospec();
 			__get_user_size(*(u32 *)to, from, 4, ret);
 			break;
 		case 8:
-			barrier_nospec();
 			__get_user_size(*(u64 *)to, from, 8, ret);
 			break;
 		}
@@ -439,11 +422,9 @@ static inline unsigned long __copy_from_user_inatomic(void *to,
 			return 0;
 	}
 
-	barrier_nospec();
-	allow_read_from_user(from, n);
-	ret = __copy_tofrom_user((__force void __user *)to, from, n);
-	prevent_read_from_user(from, n);
-	return ret;
+	check_object_size(to, n, false);
+
+	return __copy_tofrom_user((__force void __user *)to, from, n);
 }
 
 static inline unsigned long __copy_to_user_inatomic(void __user *to,

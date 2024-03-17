@@ -1,1 +1,1 @@
-#define UTS_RELEASE "4.4.302Kanjuts-perf+"
+#define UTS_RELEASE "4.4.153Kanjuts-perf+"
