@@ -1,0 +1,59 @@
+make[1]: Entering directory '/workspace/android_kernel_sdm660/out'
+  GEN     ./Makefile
+scripts/kconfig/conf  --silentoldconfig Kconfig
+  CHK     include/config/kernel.release
+  GEN     ./Makefile
+  UPD     include/config/kernel.release
+  CHK     include/generated/uapi/linux/version.h
+  UPD     include/generated/uapi/linux/version.h
+  Using .. as source for kernel
+  CHK     include/generated/utsrelease.h
+  UPD     include/generated/utsrelease.h
+  HOSTCC  scripts/dtc/dtc.o
+  HOSTCC  scripts/dtc/flattree.o
+  HOSTCC  scripts/dtc/fstree.o
+  CHK     include/generated/timeconst.h
+  CC      kernel/bounds.s
+  HOSTCC  scripts/genksyms/genksyms.o
+  CC      scripts/mod/empty.o
+  HOSTCC  scripts/mod/mk_elfconfig
+  HOSTCC  scripts/selinux/genheaders/genheaders
+  CC      scripts/mod/devicetable-offsets.s
+  HOSTCC  scripts/selinux/mdp/mdp
+  HOSTCC  scripts/dtc/data.o
+  HOSTCC  scripts/dtc/livetree.o
+  CHK     include/generated/bounds.h
+  CC      arch/arm64/kernel/asm-offsets.s
+  MKELF   scripts/mod/elfconfig.h
+  CHK     scripts/mod/devicetable-offsets.h
+  HOSTCC  scripts/genksyms/parse.tab.o
+  HOSTCC  scripts/dtc/treesource.o
+  HOSTCC  scripts/mod/sumversion.o
+  HOSTCC  scripts/dtc/srcpos.o
+  HOSTCC  scripts/dtc/checks.o
+  HOSTCC  scripts/genksyms/lex.lex.o
+  HOSTCC  scripts/dtc/util.o
+  HOSTCC  scripts/dtc/dtc-lexer.lex.o
+  HOSTCC  scripts/dtc/dtc-parser.tab.o
+  HOSTCC  scripts/kallsyms
+  HOSTCC  scripts/pnmtologo
+  HOSTCC  scripts/sortextable
+  HOSTCC  scripts/mod/modpost.o
+  HOSTCC  scripts/asn1_compiler
+  HOSTCC  scripts/mod/file2alias.o
+  HOSTCC  scripts/sign-file
+  HOSTCC  scripts/extract-cert
+  CHK     include/generated/asm-offsets.h
+  CALL    ../scripts/checksyscalls.sh
+  HOSTLD  scripts/dtc/dtc
+/usr/bin/ld: scripts/dtc/dtc-parser.tab.o:(.bss+0x10): multiple definition of `yylloc'; scripts/dtc/dtc-lexer.lex.o:(.bss+0x0): first defined here
+collect2: error: ld returned 1 exit status
+make[3]: *** [scripts/Makefile.host:100: scripts/dtc/dtc] Error 1
+make[2]: *** [../scripts/Makefile.build:489: scripts/dtc] Error 2
+make[2]: *** Waiting for unfinished jobs....
+  HOSTLD  scripts/genksyms/genksyms
+  HOSTLD  scripts/mod/modpost
+make[1]: *** [/workspace/android_kernel_sdm660/Makefile:561: scripts] Error 2
+make[1]: *** Waiting for unfinished jobs....
+make[1]: Leaving directory '/workspace/android_kernel_sdm660/out'
+make: *** [Makefile:152: sub-make] Error 2

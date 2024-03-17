@@ -32,7 +32,7 @@ struct fih_camera_sensor_info {
 };
 
 // back:0, front:1, aux:2
-struct fih_camera_sensor_info cam_info[4];
+struct fih_camera_sensor_info cam_info[3];
 
 //main camera
 static int fih_camera_dev_back_show(struct seq_file *m, void *v)
@@ -84,25 +84,10 @@ static int fih_camera_dev_aux_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int fih_camera_dev_wide_camera_show(struct seq_file *m, void *v)
-{
-	pr_info("%s : %d\n", cam_info[3].sensor_name, cam_info[3].position);
-	seq_printf(m, "%s : %d\n", cam_info[3].sensor_name, cam_info[3].position);
-	return 0;
-}
-
-
 static int fih_camera_dev_proc_aux_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, fih_camera_dev_aux_show, NULL);
 };
-
-
-static int fih_camera_dev_proc_wide_camera_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, fih_camera_dev_wide_camera_show, NULL);
-};
-
 
 static struct file_operations aux_file_ops = {
 	.owner   = THIS_MODULE,
@@ -111,15 +96,6 @@ static struct file_operations aux_file_ops = {
 	.llseek  = seq_lseek,
 	.release = single_release
 };
-
-static struct file_operations wide_camera_file_ops = {
-	.owner   = THIS_MODULE,
-	.open    = fih_camera_dev_proc_wide_camera_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = single_release
-};
-
 
 int fih_camera_dev_init(struct msm_camera_sensor_slave_info *slave_info)
 {
@@ -130,35 +106,11 @@ int fih_camera_dev_init(struct msm_camera_sensor_slave_info *slave_info)
 
 	switch(position){
 		case BACK_CAMERA_B:
-			#if 0
-			//SW-NJ-implement-TAS camera add main2 proc interface*{_20181207 */
-			if(!strcmp(slave_info->sensor_name,"s5kgm1sp")){
 			sprintf(my_proc_name,"cam_back");
 			//set cam info
 			sprintf(cam_info[0].sensor_name, slave_info->sensor_name);
 			cam_info[0].position = position;
 			entry = proc_create(my_proc_name, 0444, NULL, &back_file_ops);
-			}
-			else if(!strcmp(slave_info->sensor_name,"hi846")){
-				sprintf(my_proc_name,"cam_wide");
-				//set cam info
-				sprintf(cam_info[3].sensor_name, slave_info->sensor_name);
-				cam_info[3].position = position;
-				entry = proc_create(my_proc_name, 0444, NULL, &wide_camera_file_ops);
-
-			}
-			else
-			//SW-NJ-implement-TAS camera add main2 proc interface*}_20181207 */
-			#endif
-			{
-				sprintf(my_proc_name,"cam_back");
-				//set cam info
-				sprintf(cam_info[0].sensor_name, slave_info->sensor_name);
-				cam_info[0].position = position;
-				entry = proc_create(my_proc_name, 0444, NULL, &back_file_ops);
-
-			}
-				
 			break;
 
 		case FRONT_CAMERA_B:
@@ -170,39 +122,17 @@ int fih_camera_dev_init(struct msm_camera_sensor_slave_info *slave_info)
 			break;
 
 		case AUX_CAMERA_B:
-			#if 1
-			//SW-NJ-implement-TAS camera add main2 proc interface*{_20181207 */
-			if(!strcmp(slave_info->sensor_name,"s5k5e9yu05")){
 			sprintf(my_proc_name,"cam_aux");
 			//set cam info
 			sprintf(cam_info[2].sensor_name, slave_info->sensor_name);
 			cam_info[2].position = position;
 			entry = proc_create(my_proc_name, 0444, NULL, &aux_file_ops);
-			}
-			else if(!strcmp(slave_info->sensor_name,"hi846")){
-				sprintf(my_proc_name,"cam_wide");
-				//set cam info
-				sprintf(cam_info[3].sensor_name, slave_info->sensor_name);
-				cam_info[3].position = position;
-				entry = proc_create(my_proc_name, 0444, NULL, &wide_camera_file_ops);
-
-			}
-			else
-			//SW-NJ-implement-TAS camera add main2 proc interface*}_20181207 */
-		   #endif
-			{
-			sprintf(my_proc_name,"cam_aux");
-			//set cam info
-			sprintf(cam_info[2].sensor_name, slave_info->sensor_name);
-			cam_info[2].position = position;
-			entry = proc_create(my_proc_name, 0444, NULL, &aux_file_ops);
-			}
 			break;
 
 		default:
 			//sprintf(my_proc_name,"cam_%d", position);
 			//entry = proc_create(my_proc_name, 0444, NULL, &my_file_ops);
-			pr_err("invalid position %d", position);
+			pr_info("invalid position %d", position);
 			break;
 	}
 	if (!entry) {

@@ -13,12 +13,15 @@
 #include <soc/qcom/camera2.h>
 #include "msm_camera_i2c.h"
 #include "msm_cci.h"
+#include "../fih_camera_bbs.h"  //add
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 #define S_I2C_DBG(fmt, args...) pr_debug(fmt, ##args)
 #define MAX_I2C_ADDR_TYPE_SIZE (MSM_CAMERA_I2C_3B_ADDR + 1)
 #define MAX_I2C_DATA_TYPE_SIZE (MSM_CAMERA_I2C_SET_BYTE_WRITE_MASK_DATA + 1)
+
+extern void fih_camera_bbs_by_cci(int master,int sid,int error_code);//add
 
 int32_t msm_camera_cci_i2c_read(struct msm_camera_i2c_client *client,
 	uint32_t addr, uint16_t *data,
@@ -43,8 +46,12 @@ int32_t msm_camera_cci_i2c_read(struct msm_camera_i2c_client *client,
 	cci_ctrl.cfg.cci_i2c_read_cfg.num_byte = data_type;
 	rc = v4l2_subdev_call(client->cci_client->cci_subdev,
 			core, ioctl, VIDIOC_MSM_CCI_CFG, &cci_ctrl);
+#if FIH_CAMERA_BBS_DEBUG
+	fih_camera_bbs_by_cci(cci_ctrl.cci_info->cci_i2c_master,cci_ctrl.cci_info->sid, FIH_BBS_CAMERA_ERRORCODE_I2C_READ);
+#endif
 	if (rc < 0) {
 		pr_err("%s: line %d rc = %d\n", __func__, __LINE__, rc);
+		fih_camera_bbs_by_cci(cci_ctrl.cci_info->cci_i2c_master,cci_ctrl.cci_info->sid, FIH_BBS_CAMERA_ERRORCODE_I2C_READ);
 		return rc;
 	}
 	rc = cci_ctrl.status;
@@ -61,6 +68,7 @@ int32_t msm_camera_cci_i2c_read_seq(struct msm_camera_i2c_client *client,
 	uint32_t addr, uint8_t *data, uint32_t num_byte)
 {
 	int32_t rc = -EFAULT;
+	unsigned char buf_onstack[SZ_1K];
 	unsigned char *buf = NULL;
 	int i;
 	struct msm_camera_cci_ctrl cci_ctrl;
@@ -78,10 +86,15 @@ int32_t msm_camera_cci_i2c_read_seq(struct msm_camera_i2c_client *client,
 		return rc;
 	}
 
-	buf = kzalloc(num_byte, GFP_KERNEL);
-	if (!buf) {
-		pr_err("%s:%d no memory\n", __func__, __LINE__);
-		return -ENOMEM;
+	if (num_byte <= sizeof(buf_onstack)) {
+		buf = buf_onstack;
+		memset(buf, 0, num_byte);
+	} else {
+		buf = kzalloc(num_byte, GFP_KERNEL);
+		if (!buf) {
+			pr_err("%s:%d no memory\n", __func__, __LINE__);
+			return -ENOMEM;
+		}
 	}
 	cci_ctrl.cmd = MSM_CCI_I2C_READ;
 	cci_ctrl.cci_info = client->cci_client;
@@ -101,7 +114,8 @@ int32_t msm_camera_cci_i2c_read_seq(struct msm_camera_i2c_client *client,
 		S_I2C_DBG("Byte %d: 0x%x\n", i, buf[i]);
 		S_I2C_DBG("Data: 0x%x\n", data[i]);
 	}
-	kfree(buf);
+	if (buf != buf_onstack)
+		kfree(buf);
 	return rc;
 }
 
@@ -132,8 +146,12 @@ int32_t msm_camera_cci_i2c_write(struct msm_camera_i2c_client *client,
 	cci_ctrl.cfg.cci_i2c_write_cfg.size = 1;
 	rc = v4l2_subdev_call(client->cci_client->cci_subdev,
 			core, ioctl, VIDIOC_MSM_CCI_CFG, &cci_ctrl);
+#if FIH_CAMERA_BBS_DEBUG
+	fih_camera_bbs_by_cci(cci_ctrl.cci_info->cci_i2c_master,cci_ctrl.cci_info->sid, FIH_BBS_CAMERA_ERRORCODE_I2C_WRITE);
+#endif
 	if (rc < 0) {
 		pr_err("%s: line %d rc = %d\n", __func__, __LINE__, rc);
+		fih_camera_bbs_by_cci(cci_ctrl.cci_info->cci_i2c_master,cci_ctrl.cci_info->sid, FIH_BBS_CAMERA_ERRORCODE_I2C_WRITE);
 		return rc;
 	}
 	rc = cci_ctrl.status;
@@ -147,6 +165,8 @@ int32_t msm_camera_cci_i2c_write_seq(struct msm_camera_i2c_client *client,
 	uint32_t i = 0;
 	struct msm_camera_cci_ctrl cci_ctrl;
 	struct msm_camera_i2c_reg_array *reg_conf_tbl = NULL;
+	struct msm_camera_i2c_reg_array reg_tbl_onstack[
+		SZ_1K / sizeof(struct msm_camera_i2c_reg_array)];
 
 	if ((client->addr_type != MSM_CAMERA_I2C_BYTE_ADDR
 		&& client->addr_type != MSM_CAMERA_I2C_WORD_ADDR)
@@ -162,11 +182,16 @@ int32_t msm_camera_cci_i2c_write_seq(struct msm_camera_i2c_client *client,
 	S_I2C_DBG("%s reg addr = 0x%x num bytes: %d\n",
 		__func__, addr, num_byte);
 
-	reg_conf_tbl = kzalloc(num_byte *
-		(sizeof(struct msm_camera_i2c_reg_array)), GFP_KERNEL);
-	if (!reg_conf_tbl) {
-		pr_err("%s:%d no memory\n", __func__, __LINE__);
-		return -ENOMEM;
+	if (num_byte <= ARRAY_SIZE(reg_tbl_onstack)) {
+		reg_conf_tbl = reg_tbl_onstack;
+		memset(reg_conf_tbl, 0, num_byte * sizeof(*reg_conf_tbl));
+	} else {
+		reg_conf_tbl = kzalloc(num_byte *
+			(sizeof(struct msm_camera_i2c_reg_array)), GFP_KERNEL);
+		if (!reg_conf_tbl) {
+			pr_err("%s:%d no memory\n", __func__, __LINE__);
+			return -ENOMEM;
+		}
 	}
 
 	reg_conf_tbl[0].reg_addr = addr;
@@ -185,8 +210,8 @@ int32_t msm_camera_cci_i2c_write_seq(struct msm_camera_i2c_client *client,
 			core, ioctl, VIDIOC_MSM_CCI_CFG, &cci_ctrl);
 	CDBG("%s line %d rc = %d\n", __func__, __LINE__, rc);
 	rc = cci_ctrl.status;
-	kfree(reg_conf_tbl);
-	reg_conf_tbl = NULL;
+	if (reg_conf_tbl != reg_tbl_onstack)
+		kfree(reg_conf_tbl);
 	return rc;
 }
 
@@ -216,8 +241,12 @@ static int32_t msm_camera_cci_i2c_write_table_cmd(
 	cci_ctrl.cfg.cci_i2c_write_cfg.size = write_setting->size;
 	rc = v4l2_subdev_call(client->cci_client->cci_subdev,
 			core, ioctl, VIDIOC_MSM_CCI_CFG, &cci_ctrl);
+#if FIH_CAMERA_BBS_DEBUG
+	fih_camera_bbs_by_cci(cci_ctrl.cci_info->cci_i2c_master,cci_ctrl.cci_info->sid, FIH_BBS_CAMERA_ERRORCODE_I2C_WRITE_SEQ);
+#endif
 	if (rc < 0) {
 		pr_err("%s: line %d rc = %d\n", __func__, __LINE__, rc);
+		fih_camera_bbs_by_cci(cci_ctrl.cci_info->cci_i2c_master,cci_ctrl.cci_info->sid, FIH_BBS_CAMERA_ERRORCODE_I2C_WRITE_SEQ);
 		return rc;
 	}
 	rc = cci_ctrl.status;
@@ -333,8 +362,12 @@ int32_t msm_camera_cci_i2c_write_table_w_microdelay(
 	cci_ctrl.cfg.cci_i2c_write_cfg.size = write_setting->size;
 	rc = v4l2_subdev_call(client->cci_client->cci_subdev,
 			core, ioctl, VIDIOC_MSM_CCI_CFG, &cci_ctrl);
+#if FIH_CAMERA_BBS_DEBUG
+	fih_camera_bbs_by_cci(cci_ctrl.cci_info->cci_i2c_master,cci_ctrl.cci_info->sid, FIH_BBS_CAMERA_ERRORCODE_I2C_WRITE_SEQ);
+#endif
 	if (rc < 0) {
 		pr_err("%s: line %d rc = %d\n", __func__, __LINE__, rc);
+		fih_camera_bbs_by_cci(cci_ctrl.cci_info->cci_i2c_master,cci_ctrl.cci_info->sid, FIH_BBS_CAMERA_ERRORCODE_I2C_WRITE_SEQ);
 		return rc;
 	}
 	rc = cci_ctrl.status;

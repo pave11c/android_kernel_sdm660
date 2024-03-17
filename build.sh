@@ -2,7 +2,8 @@
 # copy right by zetaxbyte
 # you can rich me on telegram t.me/@zetaxbyte
 # flags of proton clang
-
+make clean 
+make mrproper
 if [ -d $pwd../proton-clang ] ; then
 echo -e "\n lets's go \n"
 else

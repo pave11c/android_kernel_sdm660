@@ -373,7 +373,7 @@ int ion_do_cache_op(struct ion_client *client, struct ion_handle *handle,
 	if (!ION_IS_CACHED(flags))
 		return 0;
 
-	if (get_secure_vmid(flags) > 0)
+	if (flags & ION_FLAG_SECURE)
 		return 0;
 
 	table = buffer->sg_table;
@@ -760,14 +760,17 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 
 		lock_client(client);
 		if (data.flush_data.handle > 0) {
-			handle = ion_handle_get_by_id_nolock(
-					client, (int)data.flush_data.handle);
+			mutex_lock(&client->lock);
+			handle = ion_handle_get_by_id_nolock(client,
+						(int)data.flush_data.handle);
 			if (IS_ERR(handle)) {
+				mutex_unlock(&client->lock);
 				pr_info("%s: Could not find handle: %d\n",
 					__func__, (int)data.flush_data.handle);
 				unlock_client(client);
 				return PTR_ERR(handle);
 			}
+			mutex_unlock(&client->lock);
 		} else {
 			handle = ion_import_dma_buf_nolock(client,
 							   data.flush_data.fd);
@@ -781,9 +784,9 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 
 		down_read(&mm->mmap_sem);
 
-		start = (unsigned long)data.flush_data.vaddr +
-			data.flush_data.offset;
-		end = start + data.flush_data.length;
+		start = (unsigned long) data.flush_data.vaddr;
+		end = (unsigned long) data.flush_data.vaddr
+			+ data.flush_data.length;
 
 		if (start && check_vaddr_bounds(start, end)) {
 			pr_err("%s: virtual address %pK is out of bounds\n",
