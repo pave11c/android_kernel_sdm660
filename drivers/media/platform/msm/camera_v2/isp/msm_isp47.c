@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -25,6 +25,7 @@
 #include "cam_soc_api.h"
 #include "msm_isp48.h"
 #include "linux/iopoll.h"
+#include "msm_cam_cx_ipeak.h"
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
@@ -191,7 +192,7 @@ static int32_t msm_vfe47_init_dt_parms(struct vfe_device *vfe_dev,
 	struct msm_vfe_hw_init_parms *dt_parms, void __iomem *dev_mem_base)
 {
 	struct device_node *of_node;
-	int32_t i = 0 , rc = 0;
+	int32_t i = 0, rc = 0;
 	uint32_t *dt_settings = NULL, *dt_regs = NULL, num_dt_entries = 0;
 
 	of_node = vfe_dev->pdev->dev.of_node;
@@ -713,8 +714,10 @@ void msm_isp47_preprocess_camif_irq(struct vfe_device *vfe_dev,
 {
 	if (irq_status0 & BIT(3))
 		vfe_dev->axi_data.src_info[VFE_PIX_0].accept_frame = false;
-	if (irq_status0 & BIT(0))
+	if (irq_status0 & BIT(0)) {
 		vfe_dev->axi_data.src_info[VFE_PIX_0].accept_frame = true;
+		vfe_dev->irq_sof_id++;
+	}
 }
 
 void msm_vfe47_reg_update(struct vfe_device *vfe_dev,
@@ -846,6 +849,10 @@ static void msm_vfe47_axi_enable_wm(void __iomem *vfe_base,
 		val |= 0x1;
 	else
 		val &= ~0x1;
+
+	trace_printk("%s:%d  wm_idx %d enable %d\n",__func__, __LINE__,
+		wm_idx,	enable);
+
 	msm_camera_io_w_mb(val,
 		vfe_base + VFE47_WM_BASE(wm_idx));
 }
@@ -1254,6 +1261,10 @@ void msm_vfe47_cfg_fetch_engine(struct vfe_device *vfe_dev,
 		case V4L2_PIX_FMT_P16GBRG10:
 		case V4L2_PIX_FMT_P16GRBG10:
 		case V4L2_PIX_FMT_P16RGGB10:
+		case V4L2_PIX_FMT_P16BGGR12:
+		case V4L2_PIX_FMT_P16GBRG12:
+		case V4L2_PIX_FMT_P16GRBG12:
+		case V4L2_PIX_FMT_P16RGGB12:
 			main_unpack_pattern = 0xB210;
 			break;
 		default:
@@ -1715,6 +1726,14 @@ void msm_vfe47_axi_cfg_wm_reg(
 	if (stream_info->frame_based)
 		val |= 0x2;
 	msm_camera_io_w(val, vfe_dev->vfe_base + wm_base + 0x14);
+	trace_printk("%s:%d state %d src %d stream id %d session_id %x frame_base %d\n",
+		__func__, __LINE__,
+		stream_info->state,
+		stream_info->stream_src,
+		stream_info->stream_id,
+		stream_info->session_id,
+		stream_info->frame_based);
+
 	if (!stream_info->frame_based) {
 		/* WR_IMAGE_SIZE */
 		val = ((msm_isp_cal_word_per_line(
@@ -2680,7 +2699,9 @@ int msm_vfe47_set_clk_rate(struct vfe_device *vfe_dev, long *rate)
 		prev_clk_rate <
 		vfe_dev->vfe_clk_rates[MSM_VFE_CLK_RATE_NOMINAL]
 		[vfe_dev->hw_info->vfe_clk_idx]) {
-		ret = cx_ipeak_update(vfe_dev->vfe_cx_ipeak, true);
+		pr_debug("%s: clk is more than Nominal vfe %d, ipeak bit %d\n",
+			__func__, vfe_dev->pdev->id, vfe_dev->cx_ipeak_bit);
+		ret = cam_cx_ipeak_update_vote_cx_ipeak(vfe_dev->cx_ipeak_bit);
 		if (ret) {
 			pr_err("%s: cx_ipeak_update failed %d\n",
 				__func__, ret);
@@ -2703,7 +2724,9 @@ int msm_vfe47_set_clk_rate(struct vfe_device *vfe_dev, long *rate)
 		prev_clk_rate >=
 		vfe_dev->vfe_clk_rates[MSM_VFE_CLK_RATE_NOMINAL]
 		[vfe_dev->hw_info->vfe_clk_idx]) {
-		ret = cx_ipeak_update(vfe_dev->vfe_cx_ipeak, false);
+		pr_debug("%s:clk is less than Nominal vfe %d, ipeak bit %d\n",
+			__func__, vfe_dev->pdev->id, vfe_dev->cx_ipeak_bit);
+		ret = cam_cx_ipeak_unvote_cx_ipeak(vfe_dev->cx_ipeak_bit);
 		if (ret) {
 			pr_err("%s: cx_ipeak_update failed %d\n",
 				__func__, ret);

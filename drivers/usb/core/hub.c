@@ -36,6 +36,8 @@
 #define USB_VENDOR_GENESYS_LOGIC		0x05e3
 #define HUB_QUIRK_CHECK_PORT_AUTOSUSPEND	0x01
 
+extern int deny_new_usb;
+
 /* Protect struct usb_device->state and ->children members
  * Note: Both are also protected by ->dev.sem, except that ->state can
  * change to USB_STATE_NOTATTACHED even when the semaphore isn't held. */
@@ -297,7 +299,8 @@ static void usb_set_lpm_sel(struct usb_device *udev,
 	udev_lpm_params->sel = total_sel;
 }
 
-static void usb_set_lpm_parameters(struct usb_device *udev)
+//20171108@Bobihlee from QC can't support 0201 LPM. 
+static void __maybe_unused usb_set_lpm_parameters(struct usb_device *udev)
 {
 	struct usb_hub *hub;
 	unsigned int port_to_port_delay;
@@ -1682,47 +1685,6 @@ static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
 
 	desc = intf->cur_altsetting;
 	hdev = interface_to_usbdev(intf);
-
-	/*
-	 * Set default autosuspend delay as 0 to speedup bus suspend,
-	 * based on the below considerations:
-	 *
-	 * - Unlike other drivers, the hub driver does not rely on the
-	 *   autosuspend delay to provide enough time to handle a wakeup
-	 *   event, and the submitted status URB is just to check future
-	 *   change on hub downstream ports, so it is safe to do it.
-	 *
-	 * - The patch might cause one or more auto supend/resume for
-	 *   below very rare devices when they are plugged into hub
-	 *   first time:
-	 *
-	 *   	devices having trouble initializing, and disconnect
-	 *   	themselves from the bus and then reconnect a second
-	 *   	or so later
-	 *
-	 *   	devices just for downloading firmware, and disconnects
-	 *   	themselves after completing it
-	 *
-	 *   For these quite rare devices, their drivers may change the
-	 *   autosuspend delay of their parent hub in the probe() to one
-	 *   appropriate value to avoid the subtle problem if someone
-	 *   does care it.
-	 *
-	 * - The patch may cause one or more auto suspend/resume on
-	 *   hub during running 'lsusb', but it is probably too
-	 *   infrequent to worry about.
-	 *
-	 * - Change autosuspend delay of hub can avoid unnecessary auto
-	 *   suspend timer for hub, also may decrease power consumption
-	 *   of USB bus.
-	 *
-	 * - If user has indicated to prevent autosuspend by passing
-	 *   usbcore.autosuspend = -1 then keep autosuspend disabled.
-	 */
-#ifdef CONFIG_PM
-	if (hdev->dev.power.autosuspend_delay >= 0)
-		pm_runtime_set_autosuspend_delay(&hdev->dev, 0);
-#endif
 
 	/*
 	 * Hubs have proper suspend/resume support, except for root hubs
@@ -3447,7 +3409,7 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 		}
 
 		/* TRSMRCY = 10 msec */
-		msleep(10);
+		usleep_range(10000, 10500);
 	}
 
 	if (udev->persist_enabled && hub_is_superspeed(hub->hdev))
@@ -4664,11 +4626,14 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 	usb_detect_quirks(udev);
 
 	if (udev->wusb == 0 && le16_to_cpu(udev->descriptor.bcdUSB) >= 0x0201) {
-		retval = usb_get_bos_descriptor(udev);
+		//20171108@Bobihlee from QC can't support 0201 LPM. ,Begin 
+		dev_dbg(&udev->dev, "from QC can't support 0201 LPM \n");
+/*		retval = usb_get_bos_descriptor(udev);
 		if (!retval) {
 			udev->lpm_capable = usb_device_supports_lpm(udev);
 			usb_set_lpm_parameters(udev);
-		}
+		} */
+		//20171108@Bobihlee from QC can't support 0201 LPM. ,End 
 	}
 
 	retval = 0;
@@ -4820,6 +4785,12 @@ static void hub_port_connect(struct usb_hub *hub, int port1, u16 portstatus,
 			goto done;
 		return;
 	}
+
+	if (deny_new_usb) {
+		dev_err(&port_dev->dev, "denied insert of USB device on port %d\n", port1);
+		goto done;
+	}
+
 	if (hub_is_superspeed(hub->hdev))
 		unit_load = 150;
 	else

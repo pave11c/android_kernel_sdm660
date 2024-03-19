@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1403,6 +1403,8 @@ wcnss_gpios_config(struct resource *gpios_5wire, bool enable)
 		if (enable) {
 			rc = gpio_request(i, gpios_5wire->name);
 			if (rc) {
+				pr_info("BBox; %s: WCNSS gpio_request %d err %d\n",__func__, i, rc);
+				printk("BBox::UEC;13::6\n");
 				pr_err("WCNSS gpio_request %d err %d\n", i, rc);
 				goto fail;
 			}
@@ -1471,6 +1473,8 @@ wcnss_ctrl_probe(struct platform_device *pdev)
 	ret = smd_named_open_on_edge(WCNSS_CTRL_CHANNEL, SMD_APPS_WCNSS,
 			&penv->smd_ch, penv, wcnss_smd_notify_event);
 	if (ret < 0) {
+		pr_info("BBox; %s: wcnss: cannot open the smd command channel %s: %d\n",__func__, WCNSS_CTRL_CHANNEL, ret);
+		printk("BBox::UEC;13::7\n");
 		pr_err("wcnss: cannot open the smd command channel %s: %d\n",
 				WCNSS_CTRL_CHANNEL, ret);
 		return -ENODEV;
@@ -1655,7 +1659,7 @@ EXPORT_SYMBOL(wcnss_get_wlan_mac_address);
 static int enable_wcnss_suspend_notify;
 
 static int enable_wcnss_suspend_notify_set(const char *val,
-				struct kernel_param *kp)
+					   const struct kernel_param *kp)
 {
 	int ret;
 
@@ -2011,6 +2015,8 @@ static unsigned char wcnss_fw_status(void)
 
 	len = smd_read_avail(penv->smd_ch);
 	if (len < 1) {
+		pr_info("BBox; %s: invalid firmware status\n",__func__);
+		printk("BBox::UEC;13::8\n");
 		pr_err("%s: invalid firmware status", __func__);
 		return fw_status;
 	}
@@ -2031,6 +2037,8 @@ static void wcnss_send_cal_rsp(unsigned char fw_status)
 
 	msg = kmalloc((sizeof(struct smd_msg_hdr) + 1), GFP_KERNEL);
 	if (NULL == msg) {
+		pr_info("BBox; wcnss: %s: failed to get memory\n",__func__);
+		printk("BBox::UEC;13::9\n");
 		pr_err("wcnss: %s: failed to get memory\n", __func__);
 		return;
 	}
@@ -2144,9 +2152,8 @@ unlock_exit:
 	return;
 }
 
-static void wcnssctrl_rx_handler(struct work_struct *worker)
+static void wcnss_process_smd_msg(int len)
 {
-	int len = 0;
 	int rc = 0;
 	unsigned char buf[sizeof(struct wcnss_version)];
 	unsigned char build[WCNSS_MAX_BUILD_VER_LEN+1];
@@ -2155,17 +2162,6 @@ static void wcnssctrl_rx_handler(struct work_struct *worker)
 	struct wcnss_version *pversion;
 	int hw_type;
 	unsigned char fw_status = 0;
-
-	len = smd_read_avail(penv->smd_ch);
-	if (len > WCNSS_MAX_FRAME_SIZE) {
-		pr_err("wcnss: frame larger than the allowed size\n");
-		smd_read(penv->smd_ch, NULL, len);
-		return;
-	}
-	if (len < sizeof(struct smd_msg_hdr)) {
-		pr_debug("wcnss: incomplete header available len = %d\n", len);
-		return;
-	}
 
 	rc = smd_read(penv->smd_ch, buf, sizeof(struct smd_msg_hdr));
 	if (rc < sizeof(struct smd_msg_hdr)) {
@@ -2276,6 +2272,33 @@ static void wcnssctrl_rx_handler(struct work_struct *worker)
 	return;
 }
 
+static void wcnssctrl_rx_handler(struct work_struct *worker)
+{
+	int len;
+
+	while (1) {
+		len = smd_read_avail(penv->smd_ch);
+		if (len == 0) {
+			pr_debug("wcnss: No more data to be read\n");
+			return;
+		}
+
+		if (len > WCNSS_MAX_FRAME_SIZE) {
+			pr_err("wcnss: frame larger than the allowed size\n");
+			smd_read(penv->smd_ch, NULL, len);
+			return;
+		}
+
+		if (len < sizeof(struct smd_msg_hdr)) {
+			pr_err("wcnss: incomplete header available len = %d\n",
+			       len);
+			return;
+		}
+
+		wcnss_process_smd_msg(len);
+	}
+}
+
 static void wcnss_send_version_req(struct work_struct *worker)
 {
 	struct smd_msg_hdr smd_msg;
@@ -2363,8 +2386,16 @@ static void wcnss_nvbin_dnld(void)
 	ret = request_firmware(&nv, NVBIN_FILE, dev);
 
 	if (ret || !nv || !nv->data || !nv->size) {
+		pr_info("BBox; %s: request_firmware failed for %s\n",__func__, NVBIN_FILE);
+		printk("BBox::UEC;13::10\n");
 		pr_err("wcnss: %s: request_firmware failed for %s (ret = %d)\n",
 			__func__, NVBIN_FILE, ret);
+		goto out;
+	}
+
+	if (nv->size <= 4) {
+		pr_err("wcnss: %s: request_firmware failed for %s (file size = %zu)\n",
+		       __func__, NVBIN_FILE, nv->size);
 		goto out;
 	}
 
@@ -2755,6 +2786,8 @@ wcnss_trigger_config(struct platform_device *pdev)
 		ret = wcnss_pronto_gpios_config(pdev, true);
 
 	if (ret) {
+		pr_info("BBox; %s: WCNSS gpios config failed. ret=%d\n",__func__, ret);
+		printk("BBox::UEC;13::11\n");
 		dev_err(&pdev->dev, "WCNSS gpios config failed.\n");
 		goto fail_gpio_res;
 	}
@@ -3345,7 +3378,11 @@ static int wcnss_notif_cb(struct notifier_block *this, unsigned long code,
 					WCNSS_WLAN_SWITCH_ON, &xo_mode);
 			wcnss_set_iris_xo_mode(xo_mode);
 			if (ret)
+			{
 				pr_err("Failed to execute wcnss_wlan_power\n");
+				printk("BBox::UEC;13::0\n");
+				pr_info("BBox; %s: WCNSS Power-up failed. ret=%d\n",__func__, ret);
+		    }
 		}
 	} else if (code == SUBSYS_PROXY_UNVOTE) {
 		if (pdev && pwlanconfig) {

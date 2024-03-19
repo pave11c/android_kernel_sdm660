@@ -407,29 +407,28 @@ static int ovl_create_or_link(struct dentry *dentry, int mode, dev_t rdev,
 	if (!ovl_dentry_is_opaque(dentry)) {
 		err = ovl_create_upper(dentry, inode, &stat, link, hardlink);
 	} else {
-		const struct cred *old_cred;
+		const struct cred *old_cred, *hold_cred = NULL;
 		struct cred *override_cred;
 
 		err = -ENOMEM;
 		override_cred = prepare_creds();
-		if (!override_cred)
-			goto out_iput;
+		if (override_cred) {
+			const struct cred *our_cred;
 
-		/*
-		 * CAP_SYS_ADMIN for setting opaque xattr
-		 * CAP_DAC_OVERRIDE for create in workdir, rename
-		 * CAP_FOWNER for removing whiteout from sticky dir
-		 */
-		cap_raise(override_cred->cap_effective, CAP_SYS_ADMIN);
-		cap_raise(override_cred->cap_effective, CAP_DAC_OVERRIDE);
-		cap_raise(override_cred->cap_effective, CAP_FOWNER);
-		old_cred = override_creds(override_cred);
+			our_cred = old_cred;
+			if (!our_cred)
+				our_cred = current_cred();
+			override_cred->fsuid = our_cred->fsuid;
+			override_cred->fsgid = our_cred->fsgid;
+			hold_cred = override_creds(override_cred);
+			put_cred(override_cred);
 
-		err = ovl_create_over_whiteout(dentry, inode, &stat, link,
-					       hardlink);
-
-		revert_creds(old_cred);
-		put_cred(override_cred);
+			err = ovl_create_over_whiteout(dentry, inode, &stat,
+						       link, hardlink);
+		}
+		ovl_revert_creds(old_cred ?: hold_cred);
+		if (old_cred && hold_cred)
+			put_cred(hold_cred);
 	}
 
 	if (!err)
@@ -683,8 +682,7 @@ static int ovl_do_remove(struct dentry *dentry, bool is_dir)
 
 		err = ovl_remove_and_whiteout(dentry, is_dir);
 
-		revert_creds(old_cred);
-		put_cred(override_cred);
+		ovl_revert_creds(old_cred);
 	}
 out_drop_write:
 	ovl_drop_write(dentry);
@@ -946,10 +944,7 @@ out_dput_old:
 out_unlock:
 	unlock_rename(new_upperdir, old_upperdir);
 out_revert_creds:
-	if (old_opaque || new_opaque) {
-		revert_creds(old_cred);
-		put_cred(override_cred);
-	}
+	ovl_revert_creds(old_cred);
 out_drop_write:
 	ovl_drop_write(old);
 out:

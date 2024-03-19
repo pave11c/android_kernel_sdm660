@@ -989,13 +989,14 @@ retry:
 			 * still busy.
 			 */
 			if (!(io_data->read && ep->is_busy)) {
-				ret = usb_ep_queue(ep->ep, req, GFP_ATOMIC);
 				ep->is_busy = true;
+				ret = usb_ep_queue(ep->ep, req, GFP_ATOMIC);
 			}
 
 			spin_unlock_irq(&epfile->ffs->eps_lock);
 
 			if (unlikely(ret < 0)) {
+				ep->is_busy = false;
 				ret = -EIO;
 			} else if (unlikely(
 				   wait_for_completion_interruptible(done))) {
@@ -1122,6 +1123,13 @@ ffs_epfile_open(struct inode *inode, struct file *file)
 	file->private_data = epfile;
 	ffs_data_opened(epfile->ffs);
 
+	smp_mb__before_atomic();
+	atomic_set(&epfile->error, 0);
+	first_read_done = false;
+
+	ffs_log("exit:state %d setup_state %d flag %lu", epfile->ffs->state,
+		epfile->ffs->setup_state, epfile->ffs->flags);
+
 	return stream_open(inode, file);
 }
 
@@ -1133,6 +1141,9 @@ static int ffs_aio_cancel(struct kiocb *kiocb)
 	int value;
 
 	ENTER();
+
+	ffs_log("enter:state %d setup_state %d flag %lu", epfile->ffs->state,
+		epfile->ffs->setup_state, epfile->ffs->flags);
 
 	spin_lock_irqsave(&epfile->ffs->eps_lock, flags);
 
@@ -1884,6 +1895,9 @@ static void ffs_data_reset(struct ffs_data *ffs)
 	ffs->ms_os_descs_ext_prop_count = 0;
 	ffs->ms_os_descs_ext_prop_name_len = 0;
 	ffs->ms_os_descs_ext_prop_data_len = 0;
+
+	ffs_log("exit: state %d setup_state %d flag %lu", ffs->state,
+		ffs->setup_state, ffs->flags);
 }
 
 
@@ -2087,12 +2101,6 @@ static int ffs_func_eps_enable(struct ffs_function *func)
 			break;
 		}
 
-		/*
-		 * userspace setting maxburst > 1 results more fifo
-		 * allocation than without maxburst. Change maxburst to 1
-		 * only to allocate fifo size of max packet size.
-		 */
-		ep->ep->maxburst = 1;
 		ret = usb_ep_enable(ep->ep);
 		if (likely(!ret)) {
 			epfile->ep = ep;
@@ -4218,6 +4226,7 @@ static void ffs_closed(struct ffs_data *ffs)
 {
 	struct ffs_dev *ffs_obj;
 	struct f_fs_opts *opts;
+	struct config_item *ci;
 
 	ENTER();
 
@@ -4251,13 +4260,14 @@ static void ffs_closed(struct ffs_data *ffs)
 		goto done;
 	}
 
+	ci = opts->func_inst.group.cg_item.ci_parent->ci_parent;
 	ffs_dev_unlock();
 
 	if (test_bit(FFS_FL_BOUND, &ffs->flags)) {
-		unregister_gadget_item(opts->
-			       func_inst.group.cg_item.ci_parent->ci_parent);
+		unregister_gadget_item(ci);
 		ffs_log("unreg gadget done");
 	}
+	return;
 done:
 	ffs_log("exit");
 }

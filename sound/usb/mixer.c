@@ -761,8 +761,8 @@ static int check_input_term(struct mixer_build *state, int id,
 			} else { /* UAC_VERSION_3 */
 				struct uac3_input_terminal_descriptor *d = p1;
 
-				err = check_input_term(state,
-							d->bCSourceID, term);
+				err = __check_input_term(state,
+							 d->bCSourceID, term);
 				if (err < 0)
 					return err;
 
@@ -819,8 +819,8 @@ static int check_input_term(struct mixer_build *state, int id,
 			} else {
 				struct uac_selector_unit_descriptor *d = p1;
 				/* call recursively to retrieve channel info */
-				err = check_input_term(state,
-							d->baSourceID[0], term);
+				err = __check_input_term(state,
+							 d->baSourceID[0], term);
 				if (err < 0)
 					return err;
 				/* virtual type */
@@ -1039,6 +1039,15 @@ static void volume_control_quirks(struct usb_mixer_elem_info *cval,
 			cval->max = 0;
 			cval->res = 1;
 		}
+		break;
+	case USB_ID(0x1130, 0x1620): /* Logitech Speakers S150 */
+	/* This audio device has 2 channels and it explicitly requires the
+	 * host to send SET_CUR command on the volume control of both the
+	 * channels. 7936 = 0x1F00 is the default value.
+	 */
+		if (cval->channels == 2)
+			snd_usb_mixer_set_ctl_value(cval, UAC_SET_CUR,
+						(cval->control << 8) | 2, 7936);
 		break;
 	}
 }
@@ -1887,7 +1896,8 @@ static int parse_audio_mixer_unit(struct mixer_build *state, int unitid,
 		    NUM_CHANNELS_MONO : NUM_CHANNELS_STEREO;
 	} else {
 		if (desc->bLength < 11 || !(input_pins = desc->bNrInPins) ||
-		!(num_outs = uac_mixer_unit_bNrChannels(desc))) {
+		    desc->bLength < sizeof(*desc) + desc->bNrInPins ||
+		    !(num_outs = uac_mixer_unit_bNrChannels(desc))) {
 			usb_audio_err(state->chip,
 				      "invalid MIXER UNIT descriptor %d\n",
 				      unitid);

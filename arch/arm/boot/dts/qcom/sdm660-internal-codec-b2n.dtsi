@@ -115,3 +115,12 @@ qcom,cdc-dmic-gpios = <&cdc_dmic_gpios>;
 &msm_sdw_codec {
 	status = "okay";
 };
+
+&soc{
+    pcm2: qcom,msm-ultra-low-latency {
+        qcom,latency-level = "regular";
+    };
+    pcm_noirq: qcom,msm-pcm-dsp-noirq {
+        qcom,latency-level = "regular";
+    };
+};

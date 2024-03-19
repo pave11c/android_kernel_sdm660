@@ -113,6 +113,9 @@
 };
 
 &soc{
+    pcm2: qcom,msm-ultra-low-latency {
+        qcom,latency-level = "regular";
+    };
 
     wsa_spkr_en1: wsa_spkr_en1_pinctrl {
         status = "disabled";

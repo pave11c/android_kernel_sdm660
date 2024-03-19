@@ -62,6 +62,7 @@
 #include <linux/ipc_logging.h>
 #include <asm/irq.h>
 #include <linux/kthread.h>
+#include <uapi/linux/sched.h>
 
 #include <linux/msm-sps.h>
 #include <linux/platform_data/msm_serial_hs.h>
@@ -359,6 +360,8 @@ static int msm_hs_clk_bus_vote(struct msm_hs_port *msm_uport)
 			dev_err(msm_uport->uport.dev,
 				"%s: Could not turn on pclk [%d]\n",
 				__func__, rc);
+				printk("BBox; %s LINE=%d rc=%d\n",__func__,__LINE__,rc);
+        printk("BBox::UEC;14::1\n");
 			goto busreset;
 		}
 	}
@@ -367,6 +370,8 @@ static int msm_hs_clk_bus_vote(struct msm_hs_port *msm_uport)
 		dev_err(msm_uport->uport.dev,
 			"%s: Could not turn on core clk [%d]\n",
 			__func__, rc);
+			printk("BBox; %s LINE=%d rc=%d\n",__func__,__LINE__,rc);
+      printk("BBox::UEC;14::1\n");
 		goto core_unprepare;
 	}
 	MSM_HS_DBG("%s: Clock ON successful\n", __func__);
@@ -402,6 +407,8 @@ static void msm_hs_resource_unvote(struct msm_hs_port *msm_uport)
 	if (rc <= 0) {
 		MSM_HS_WARN("%s(): rc zero, bailing\n", __func__);
 		WARN_ON(1);
+				printk("BBox; %s LINE=%d rc=%d\n",__func__,__LINE__,rc);
+        printk("BBox::UEC;14::1\n");
 		return;
 	}
 	atomic_dec(&msm_uport->resource_count);
@@ -2558,6 +2565,8 @@ static int msm_hs_config_uart_gpios(struct uart_port *uport)
 			if (unlikely(ret)) {
 				MSM_HS_ERR("gpio request failed for:%d\n",
 					pdata->uart_tx_gpio);
+				printk("BBox; %s LINE=%d ret=%d\n",__func__,__LINE__,ret);
+        printk("BBox::UEC;14::1\n");
 				goto exit_uart_config;
 			}
 		}
@@ -2568,6 +2577,8 @@ static int msm_hs_config_uart_gpios(struct uart_port *uport)
 			if (unlikely(ret)) {
 				MSM_HS_ERR("gpio request failed for:%d\n",
 					pdata->uart_rx_gpio);
+				printk("BBox; %s LINE=%d ret=%d\n",__func__,__LINE__,ret);
+        printk("BBox::UEC;14::1\n");
 				goto uart_tx_unconfig;
 			}
 		}
@@ -2578,6 +2589,8 @@ static int msm_hs_config_uart_gpios(struct uart_port *uport)
 			if (unlikely(ret)) {
 				MSM_HS_ERR("gpio request failed for:%d\n",
 					pdata->uart_cts_gpio);
+				printk("BBox; %s LINE=%d ret=%d\n",__func__,__LINE__,ret);
+        printk("BBox::UEC;14::1\n");
 				goto uart_rx_unconfig;
 			}
 		}
@@ -2588,11 +2601,15 @@ static int msm_hs_config_uart_gpios(struct uart_port *uport)
 			if (unlikely(ret)) {
 				MSM_HS_ERR("gpio request failed for:%d\n",
 					pdata->uart_rfr_gpio);
+				printk("BBox; %s LINE=%d ret=%d\n",__func__,__LINE__,ret);
+        printk("BBox::UEC;14::1\n");
 				goto uart_cts_unconfig;
 			}
 		}
 	} else {
 		MSM_HS_ERR("Pdata is NULL.\n");
+				printk("BBox; %s LINE=%d ret=%d\n",__func__,__LINE__,ret);
+        printk("BBox::UEC;14::1\n");
 		ret = -EINVAL;
 	}
 	return ret;
@@ -2831,6 +2848,7 @@ static int uartdm_init_port(struct uart_port *uport)
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
 	struct msm_hs_tx *tx = &msm_uport->tx;
 	struct msm_hs_rx *rx = &msm_uport->rx;
+	struct sched_param param = { .sched_priority = 1 };
 
 	init_waitqueue_head(&rx->wait);
 	init_waitqueue_head(&tx->wait);
@@ -2845,6 +2863,8 @@ static int uartdm_init_port(struct uart_port *uport)
 		MSM_HS_ERR("%s(): error creating task", __func__);
 		goto exit_lh_init;
 	}
+	sched_setscheduler(rx->task, SCHED_FIFO, &param);
+
 	init_kthread_work(&rx->kwork, msm_serial_hs_rx_work);
 
 	init_kthread_worker(&tx->kworker);
@@ -2854,6 +2874,7 @@ static int uartdm_init_port(struct uart_port *uport)
 		MSM_HS_ERR("%s(): error creating task", __func__);
 		goto exit_lh_init;
 	}
+	sched_setscheduler(tx->task, SCHED_FIFO, &param);
 
 	init_kthread_work(&tx->kwork, msm_serial_hs_tx_work);
 
@@ -3390,6 +3411,7 @@ static void  msm_serial_hs_rt_init(struct uart_port *uport)
 	msm_uport->pm_state = MSM_HS_PM_SUSPENDED;
 	mutex_unlock(&msm_uport->mtx);
 	pm_runtime_enable(uport->dev);
+	tty_port_set_policy(&uport->state->port, SCHED_FIFO, 1);
 }
 
 static int msm_hs_runtime_suspend(struct device *dev)

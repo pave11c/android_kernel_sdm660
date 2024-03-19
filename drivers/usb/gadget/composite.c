@@ -492,14 +492,19 @@ done:
 static u8 encode_bMaxPower(enum usb_device_speed speed,
 		struct usb_configuration *c)
 {
-	unsigned val = CONFIG_USB_GADGET_VBUS_DRAW;
+	unsigned val = c->MaxPower;
 
 	switch (speed) {
 	case USB_SPEED_SUPER:
-		/* with super-speed report 900mA */
-		val = SSUSB_GADGET_VBUS_DRAW;
+		/* with super-speed report 900mA if user hasn't specified */
+		if (!val)
+			val = SSUSB_GADGET_VBUS_DRAW;
+
 		return (u8)(val / SSUSB_GADGET_VBUS_DRAW_UNITS);
 	default:
+		if (!val)
+			val = CONFIG_USB_GADGET_VBUS_DRAW;
+
 		return DIV_ROUND_UP(val, HSUSB_GADGET_VBUS_DRAW_UNITS);
 	}
 }
@@ -891,12 +896,12 @@ static int set_config(struct usb_composite_dev *cdev,
 	}
 
 done:
-	if (power <= USB_SELF_POWER_VBUS_MAX_DRAW)
+	if (USB_VBUS_DRAW(gadget->speed) <= USB_SELF_POWER_VBUS_MAX_DRAW)
 		usb_gadget_set_selfpowered(gadget);
 	else
 		usb_gadget_clear_selfpowered(gadget);
 
-	usb_gadget_vbus_draw(gadget, power);
+	usb_gadget_vbus_draw(gadget, USB_VBUS_DRAW(gadget->speed));
 	if (result >= 0 && cdev->delayed_status)
 		result = USB_GADGET_DELAYED_STATUS;
 	return result;
@@ -1937,6 +1942,9 @@ unknown:
 				if (w_index != 0x5 || (w_value >> 8))
 					break;
 				interface = w_value & 0xFF;
+				if (interface >= MAX_CONFIG_INTERFACES ||
+				    !os_desc_cfg->interface[interface])
+					break;
 				buf[6] = w_index;
 				if (w_length == 0x0A) {
 					count = count_ext_prop(os_desc_cfg,
@@ -2413,13 +2421,10 @@ void composite_resume(struct usb_gadget *gadget)
 				f->resume(f);
 		}
 
-		maxpower = cdev->config->MaxPower;
-
-		if (maxpower > USB_SELF_POWER_VBUS_MAX_DRAW)
+		if (USB_VBUS_DRAW(gadget->speed) > USB_SELF_POWER_VBUS_MAX_DRAW)
 			usb_gadget_clear_selfpowered(gadget);
 
-		usb_gadget_vbus_draw(gadget, maxpower ?
-			maxpower : CONFIG_USB_GADGET_VBUS_DRAW);
+		usb_gadget_vbus_draw(gadget, USB_VBUS_DRAW(gadget->speed));
 	}
 
 	spin_unlock_irqrestore(&cdev->lock, flags);

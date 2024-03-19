@@ -118,13 +118,8 @@
 
 &pm660l_3 {
 	pmic_analog_codec: analog-codec@f000 {
+		qcom,cdc-vdd-mic-bias-current = <30000>;
 		qcom,cdc-micbias-cfilt-mv = <2700000>;
-	};
-};
-
-&soc {
-	pcm_noirq: qcom,msm-pcm-dsp-noirq {
-		qcom,latency-level = "regular";
 	};
 };
 

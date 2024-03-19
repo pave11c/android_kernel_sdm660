@@ -290,14 +290,10 @@ static void put_pages(struct drm_gem_object *obj)
 
 	if (msm_obj->pages) {
 		if (msm_obj->sgt) {
-			/* For non-cached buffers, ensure the new
-			 * pages are clean because display controller,
-			 * GPU, etc. are not coherent:
-			 */
-			if (msm_obj->flags & (MSM_BO_WC|MSM_BO_UNCACHED))
-				dma_unmap_sg(obj->dev->dev, msm_obj->sgt->sgl,
-					     msm_obj->sgt->nents,
-					     DMA_BIDIRECTIONAL);
+			if (msm_obj->flags & MSM_BO_LOCKED) {
+				unprotect_pages(msm_obj);
+				msm_obj->flags &= ~MSM_BO_LOCKED;
+			}
 
 			sg_free_table(msm_obj->sgt);
 			kfree(msm_obj->sgt);
@@ -983,9 +979,16 @@ static struct drm_gem_object *_msm_gem_new(struct drm_device *dev,
 
 	size = PAGE_ALIGN(size);
 
-	ret = msm_gem_new_impl(dev, size, flags, &obj);
-	if (ret)
-		return ERR_PTR(ret);
+	/*
+	 * Disallow zero sized objects as they make the underlying
+	 * infrastructure grumpy
+	 */
+	if (!size)
+		return ERR_PTR(-EINVAL);
+
+	obj = msm_gem_new_impl(dev, size, flags, struct_mutex_locked);
+	if (IS_ERR(obj))
+		return obj;
 
 	if (use_pages(obj)) {
 		ret = drm_gem_object_init(dev, obj, size);
@@ -1171,9 +1174,9 @@ struct drm_gem_object *msm_gem_import(struct drm_device *dev,
 
 	size = PAGE_ALIGN(size);
 
-	ret = msm_gem_new_impl(dev, size, MSM_BO_WC, &obj);
-	if (ret)
-		return ERR_PTR(ret);
+	obj = msm_gem_new_impl(dev, size, MSM_BO_WC, false);
+	if (IS_ERR(obj))
+		return obj;
 
 	drm_gem_private_object_init(dev, obj, size);
 

@@ -16,7 +16,7 @@
 #include <linux/usb/ch9.h>
 
 #ifdef CONFIG_USB_CONFIGFS_F_ACC
-extern int acc_ctrlrequest(struct usb_composite_dev *cdev,
+extern int acc_ctrlrequest_composite(struct usb_composite_dev *cdev,
 				const struct usb_ctrlrequest *ctrl);
 void acc_disconnect(void);
 #endif
@@ -35,6 +35,10 @@ struct device *create_function_device(char *name)
 }
 EXPORT_SYMBOL_GPL(create_function_device);
 #endif
+
+// Start
+#define BBOX_USB_CONFIGURATION_FAIL    do {printk("BBox;%s: USB configuration fail!\n", __func__); printk("BBox::UEC;3::2\n");} while (0);
+// End
 
 int check_user_usb_string(const char *name,
 		struct usb_gadget_strings *stringtab_dev)
@@ -92,6 +96,12 @@ struct gadget_info {
 	char qw_sign[OS_STRING_QW_SIGN_LEN];
 	spinlock_t spinlock;
 	bool unbind;
+#ifdef CONFIG_USB_CONFIGFS_UEVENT
+	bool connected;
+	bool sw_connected;
+	struct work_struct work;
+	struct device *dev;
+#endif
 };
 
 static inline struct gadget_info *to_gadget_info(struct config_item *item)
@@ -217,7 +227,35 @@ GI_DEVICE_DESC_SIMPLE_RW(bDeviceSubClass, u8);
 GI_DEVICE_DESC_SIMPLE_RW(bDeviceProtocol, u8);
 GI_DEVICE_DESC_SIMPLE_RW(bMaxPacketSize0, u8);
 GI_DEVICE_DESC_SIMPLE_RW(idVendor, u16);
-GI_DEVICE_DESC_SIMPLE_RW(idProduct, u16);
+/* FIH - alanwhtsai - Porting fih scsi command */
+//GI_DEVICE_DESC_SIMPLE_RW(idProduct, u16);
+GI_DEVICE_DESC_SIMPLE_R_u16(idProduct);
+
+int fihPid = 0x0000;
+
+//No difference to other GI_DEVICE_DESC_SIMPLE_RW functions,
+//make it independent is just for storing current pid for fih_usb
+static ssize_t gadget_dev_desc_idProduct_store(struct config_item *item,
+		const char *page, size_t len)
+{
+	u16 val;
+	int ret;
+	ret = kstrtou16(page, 0, &val);
+	if (ret)
+		return ret;
+	to_gadget_info(item)->cdev.desc.idProduct = cpu_to_le16p(&val);
+	fihPid = cpu_to_le16p(&val); //Store current pid
+	return len;
+}
+
+//fih_usb uses this to get current pid
+int android_usb_product_id(void)
+{
+	return fihPid;
+}
+EXPORT_SYMBOL(android_usb_product_id);
+/* end FIH */
+
 GI_DEVICE_DESC_SIMPLE_R_u16(bcdDevice);
 
 static ssize_t is_valid_bcd(u16 bcd_val)
@@ -1412,7 +1450,9 @@ static int configfs_composite_bind(struct usb_gadget *gadget,
 err_purge_funcs:
 	purge_configs_funcs(gi);
 err_comp_cleanup:
+	printk("BBox::UEC;3::2\n");
 	composite_dev_cleanup(cdev);
+	BBOX_USB_CONFIGURATION_FAIL
 	return ret;
 }
 
@@ -1495,6 +1535,7 @@ static void configfs_composite_unbind(struct usb_gadget *gadget)
 	spin_unlock_irqrestore(&gi->spinlock, flags);
 }
 
+#if !IS_ENABLED(CONFIG_USB_CONFIGFS_UEVENT)
 static int configfs_composite_setup(struct usb_gadget *gadget,
 		const struct usb_ctrlrequest *ctrl)
 {
@@ -1541,6 +1582,7 @@ static void configfs_composite_disconnect(struct usb_gadget *gadget)
 	composite_disconnect(gadget);
 	spin_unlock_irqrestore(&gi->spinlock, flags);
 }
+#endif
 
 static void configfs_composite_suspend(struct usb_gadget *gadget)
 {
@@ -1612,7 +1654,7 @@ static int android_setup(struct usb_gadget *gadget,
 
 #ifdef CONFIG_USB_CONFIGFS_F_ACC
 	if (value < 0)
-		value = acc_ctrlrequest(cdev, c);
+		value = acc_ctrlrequest_composite(cdev, c);
 #endif
 
 	if (value < 0)
@@ -1670,11 +1712,15 @@ static void android_disconnect(struct usb_gadget *gadget)
 static const struct usb_gadget_driver configfs_driver_template = {
 	.bind           = configfs_composite_bind,
 	.unbind         = configfs_composite_unbind,
-
+#ifdef CONFIG_USB_CONFIGFS_UEVENT
+	.setup          = android_setup,
+	.reset          = android_disconnect,
+	.disconnect     = android_disconnect,
+#else
 	.setup          = configfs_composite_setup,
 	.reset          = configfs_composite_disconnect,
 	.disconnect     = configfs_composite_disconnect,
-
+#endif
 	.suspend	= configfs_composite_suspend,
 	.resume		= configfs_composite_resume,
 
@@ -1807,6 +1853,7 @@ static struct config_group *gadgets_make(
 	mutex_init(&gi->lock);
 	INIT_LIST_HEAD(&gi->string_list);
 	INIT_LIST_HEAD(&gi->available_func);
+	spin_lock_init(&gi->spinlock);
 
 	composite_init_dev(&gi->cdev);
 	gi->cdev.desc.bLength = USB_DT_DEVICE_SIZE;

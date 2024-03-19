@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -2180,8 +2181,8 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 			buf_index = asm_token._token.buf_index;
 			if (buf_index < 0 ||
 					buf_index >= port->max_buf_cnt) {
-				pr_err("%s: Invalid buffer index %u\n",
-					__func__, buf_index);
+				pr_debug("%s: Invalid buffer index %u\n",
+				__func__, buf_index);
 				spin_unlock_irqrestore(&port->dsp_lock,
 								dsp_flags);
 				spin_unlock_irqrestore(
@@ -2275,6 +2276,15 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 
 		config_debug_fs_read_cb();
 
+		if (data->payload_size != (READDONE_IDX_SEQ_ID + 1) * sizeof(uint32_t)) {
+			pr_err("%s:  payload size of %d is less than expected size\n",
+					__func__, data->payload_size);
+			spin_unlock_irqrestore(
+				&(session[session_id].session_lock),
+				flags);
+			return -EINVAL;
+		}
+
 		dev_vdbg(ac->dev, "%s: ReadDone: status=%d buff_add=0x%x act_size=%d offset=%d\n",
 				__func__, payload[READDONE_IDX_STATUS],
 				payload[READDONE_IDX_BUFADD_LSW],
@@ -2300,8 +2310,8 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 			spin_lock_irqsave(&port->dsp_lock, dsp_flags);
 			buf_index = asm_token._token.buf_index;
 			if (buf_index < 0 || buf_index >= port->max_buf_cnt) {
-				pr_err("%s: Invalid buffer index %u\n",
-					__func__, buf_index);
+				pr_debug("%s: Invalid buffer index %u\n",
+				__func__, buf_index);
 				spin_unlock_irqrestore(&port->dsp_lock,
 								dsp_flags);
 				spin_unlock_irqrestore(
@@ -3368,6 +3378,9 @@ static int __q6asm_open_write(struct audio_client *ac, uint32_t format,
 		break;
 	case FORMAT_APTX:
 		open.dec_fmt_id = ASM_MEDIA_FMT_APTX;
+		break;
+	case FORMAT_APTXHD:
+		open.dec_fmt_id = ASM_MEDIA_FMT_APTX_HD;
 		break;
 	case FORMAT_GEN_COMPR:
 		open.dec_fmt_id = ASM_MEDIA_FMT_GENERIC_COMPRESSED;
@@ -7947,7 +7960,7 @@ fail_cmd:
 int q6asm_audio_map_shm_fd(struct audio_client *ac, struct ion_client **client,
 			struct ion_handle **handle, int fd)
 {
-	ion_phys_addr_t paddr;
+	ion_phys_addr_t paddr = 0;
 	size_t pa_len = 0;
 	int ret;
 	int sz = 0;

@@ -60,6 +60,9 @@
 #define WCD9XXX_PAGE_NUM(reg)    (((reg) >> 8) & 0xff)
 #define WCD9XXX_PAGE_SIZE 256
 
+#define SLIMBUS_TRANSFER_FAIL  do {printk("BBox;%s: SLIMBUS transfer failure\n", __func__); printk("BBox::UEC;2::0\n");} while (0)
+#define SLIMBUS_PROBE_FAIL  do {printk("BBox;%s: SLIMBUS probe failure\n", __func__); printk("BBox::UEC;2::3\n");} while (0)
+
 struct wcd9xxx_i2c {
 	struct i2c_client *client;
 	struct i2c_msg xfer_msg[2];
@@ -244,9 +247,11 @@ static int wcd9xxx_slim_read_device(struct wcd9xxx *wcd9xxx, unsigned short reg,
 		usleep_range(5000, 5100);
 	}
 
-	if (ret)
+	if (ret) {
 		dev_err(wcd9xxx->dev, "%s: Error, Codec read failed (%d)\n",
 			__func__, ret);
+		SLIMBUS_TRANSFER_FAIL;
+	}
 
 	return ret;
 }
@@ -284,8 +289,10 @@ static int wcd9xxx_slim_write_device(struct wcd9xxx *wcd9xxx,
 		usleep_range(5000, 5100);
 	}
 
-	if (ret)
+	if (ret) {
 		pr_err("%s: Error, Codec write failed (%d)\n", __func__, ret);
+		SLIMBUS_TRANSFER_FAIL;
+	}
 
 	return ret;
 }
@@ -603,7 +610,7 @@ static void wcd9xxx_device_exit(struct wcd9xxx *wcd9xxx)
 }
 
 
-#ifdef CONFIG_DEBUG_FS
+#if defined(CONFIG_DEBUG_FS) && defined(WCD9XXX_CORE_DEBUG)
 struct wcd9xxx *debugCodec;
 
 static struct dentry *debugfs_wcd9xxx_dent;
@@ -1348,6 +1355,7 @@ static int wcd9xxx_slim_probe(struct slim_device *slim)
 	ret = wcd9xxx_reset(&slim->dev);
 	if (ret) {
 		dev_err(&slim->dev, "%s: Resetting Codec failed\n", __func__);
+		SLIMBUS_PROBE_FAIL;
 		goto err_supplies;
 	}
 
@@ -1392,7 +1400,7 @@ static int wcd9xxx_slim_probe(struct slim_device *slim)
 			__func__, ret);
 		goto err_slim_add;
 	}
-#ifdef CONFIG_DEBUG_FS
+#if defined(CONFIG_DEBUG_FS) && defined(WCD9XXX_CORE_DEBUG)
 	debugCodec = wcd9xxx;
 
 	debugfs_wcd9xxx_dent = debugfs_create_dir
@@ -1437,7 +1445,7 @@ static int wcd9xxx_slim_remove(struct slim_device *pdev)
 	struct wcd9xxx *wcd9xxx;
 	struct wcd9xxx_pdata *pdata = pdev->dev.platform_data;
 
-#ifdef CONFIG_DEBUG_FS
+#if defined(CONFIG_DEBUG_FS) && defined(WCD9XXX_CORE_DEBUG)
 	debugfs_remove_recursive(debugfs_wcd9xxx_dent);
 #endif
 	wcd9xxx = slim_get_devicedata(pdev);

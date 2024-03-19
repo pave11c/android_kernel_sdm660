@@ -66,6 +66,10 @@
 #include <asm/xen/hypervisor.h>
 #include <asm/mmu_context.h>
 
+#ifdef CONFIG_FIH_HWCONFIG
+#include <fih/swid.h>
+#endif
+
 unsigned int boot_reason;
 EXPORT_SYMBOL(boot_reason);
 
@@ -307,7 +311,7 @@ void __init setup_arch(char **cmdline_p)
 {
 	pr_info("Boot CPU: AArch64 Processor [%08x]\n", read_cpuid_id());
 
-	sprintf(init_utsname()->machine, ELF_PLATFORM);
+	sprintf(init_utsname()->machine, UTS_MACHINE);
 	init_mm.start_code = (unsigned long) _text;
 	init_mm.end_code   = (unsigned long) _etext;
 	init_mm.end_data   = (unsigned long) _edata;
@@ -412,6 +416,10 @@ static int __init topology_init(void)
 		cpu->hotpluggable = 1;
 		register_cpu(cpu, i);
 	}
+
+	#ifdef CONFIG_FIH_HWCONFIG
+	fih_swid_setup();
+	#endif
 
 	return 0;
 }
